@@ -49,3 +49,31 @@ Units are SI:
 - `kinematic_viscosity` and `density_diffusivity` in `m^2/s`
 
 The runner rejects the legacy keys `steps`, `dt`, `output_every`, `viscosity`, `density_diffusion`, and `density_decay`.
+
+## Python Pre/Postprocessing
+
+The repo now includes `fluid_sim_io.py`, a small Python helper for:
+
+- creating and validating JSON configs with the same defaults as the solver
+- listing output frames from `outputs/series.xdmf`
+- reading `outputs/data/frame_XXXX.h5` into NumPy arrays for analysis
+
+Example:
+
+```python
+from fluid_sim_io import FluidSimIO
+
+case = FluidSimIO("cases/demo/default.json")
+case.set_grid(nx=512, ny=256, dx=0.01, dy=0.01)
+case.set_simulation(end_time=5.0, cfl=0.1)
+case.write_config()
+
+frame = case.read_last_frame()
+print(frame.time)
+print(frame.density_offset.shape)  # (ny, nx)
+print(frame.velocity.shape)        # (ny, nx, 3)
+
+x, y = case.cell_centers()
+```
+
+Reading output frames requires `numpy` and `h5py` in the Python environment you use for postprocessing.

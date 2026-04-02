@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fluid_sim/simulation.hpp"
+#include "simulation/simulation_types.hpp"
 
 #include <filesystem>
 #include <string>
@@ -17,4 +17,4 @@ void write_xdmf_series(const std::filesystem::path& output_path,
                        const SimulationConfig& config,
                        const std::vector<SavedFrame>& frames);
 
-}  // namespace fluid_sim
+} // namespace fluid_sim

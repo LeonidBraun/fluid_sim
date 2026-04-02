@@ -1,4 +1,4 @@
-#include "fluid_sim/hdf5_writer.hpp"
+#include "io/hdf5_writer.hpp"
 
 #include <hdf5.h>
 
@@ -21,6 +21,7 @@ class H5Handle {
 
   H5Handle() = default;
   H5Handle(hid_t id, CloseFunction close_fn) : id_(id), close_fn_(close_fn) {}
+
   ~H5Handle() {
     if (id_ >= 0 && close_fn_ != nullptr) {
       close_fn_(id_);
@@ -48,7 +49,9 @@ class H5Handle {
     return *this;
   }
 
-  [[nodiscard]] hid_t get() const { return id_; }
+  [[nodiscard]] hid_t get() const {
+    return id_;
+  }
 
  private:
   hid_t id_ = -1;
@@ -68,7 +71,8 @@ void write_scalar_attribute(hid_t object, const char* name, double value) {
     throw std::runtime_error(std::string("Unable to create HDF5 attribute: ") + name);
   }
 
-  check_hdf5(H5Awrite(attribute.get(), H5T_NATIVE_DOUBLE, &value), "Unable to write double attribute.");
+  check_hdf5(H5Awrite(attribute.get(), H5T_NATIVE_DOUBLE, &value),
+             "Unable to write double attribute.");
 }
 
 void write_scalar_attribute(hid_t object, const char* name, int value) {
@@ -105,22 +109,8 @@ void write_scalar_dataset(hid_t file, const char* name, int nx, int ny, const st
              "Unable to write dataset.");
 }
 
-void write_vector_dataset(hid_t file, const char* name, int nx, int ny,
-                          const std::vector<float>& velocity_x,
-                          const std::vector<float>& velocity_y) {
+void write_vector_dataset(hid_t file, const char* name, int nx, int ny, const std::vector<float>& values) {
   const std::array<hsize_t, 4> dims = {1, static_cast<hsize_t>(ny), static_cast<hsize_t>(nx), 3};
-  std::vector<float> values(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) * 3U, 0.0f);
-
-  for (int y = 0; y < ny; ++y) {
-    for (int x = 0; x < nx; ++x) {
-      const std::size_t scalar_idx = static_cast<std::size_t>(y) * static_cast<std::size_t>(nx) +
-                                     static_cast<std::size_t>(x);
-      const std::size_t vector_idx = scalar_idx * 3U;
-      values[vector_idx] = velocity_x[scalar_idx];
-      values[vector_idx + 1U] = velocity_y[scalar_idx];
-    }
-  }
-
   H5Handle dataspace(H5Screate_simple(static_cast<int>(dims.size()), dims.data(), nullptr), H5Sclose);
   if (dataspace.get() < 0) {
     throw std::runtime_error("Unable to create HDF5 vector dataspace.");
@@ -137,7 +127,7 @@ void write_vector_dataset(hid_t file, const char* name, int nx, int ny,
              "Unable to write vector dataset.");
 }
 
-}  // namespace
+} // namespace
 
 void write_frame_hdf5(const std::filesystem::path& output_path,
                       const SimulationConfig& config,
@@ -145,8 +135,7 @@ void write_frame_hdf5(const std::filesystem::path& output_path,
                       double time_step,
                       const HostState& state) {
   const std::size_t expected_size = static_cast<std::size_t>(config.nx) * static_cast<std::size_t>(config.ny);
-  if (state.density_offset.size() != expected_size || state.velocity_x.size() != expected_size ||
-      state.velocity_y.size() != expected_size) {
+  if (state.density_offset.size() != expected_size || state.velocity.size() != expected_size * 3U) {
     throw std::runtime_error("HostState size does not match simulation dimensions.");
   }
 
@@ -169,7 +158,7 @@ void write_frame_hdf5(const std::filesystem::path& output_path,
   write_scalar_attribute(file.get(), "dy", config.dy);
 
   write_scalar_dataset(file.get(), "density_offset", config.nx, config.ny, state.density_offset);
-  write_vector_dataset(file.get(), "velocity", config.nx, config.ny, state.velocity_x, state.velocity_y);
+  write_vector_dataset(file.get(), "velocity", config.nx, config.ny, state.velocity);
 }
 
-}  // namespace fluid_sim
+} // namespace fluid_sim

@@ -1,4 +1,4 @@
-#include "fluid_sim/xdmf_writer.hpp"
+#include "io/xdmf_writer.hpp"
 
 #include <fstream>
 #include <iomanip>
@@ -51,4 +51,4 @@ void write_xdmf_series(const std::filesystem::path& output_path,
   stream << "</Xdmf>\n";
 }
 
-}  // namespace fluid_sim
+} // namespace fluid_sim

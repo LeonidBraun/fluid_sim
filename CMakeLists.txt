@@ -18,14 +18,15 @@ if(CMAKE_CUDA_COMPILER)
 
   add_executable(fluid_sim
     src/main.cpp
-    src/hdf5_writer.cpp
-    src/xdmf_writer.cpp
-    src/simulation.cu
+    src/io/IO.cpp
+    src/io/hdf5_writer.cpp
+    src/io/xdmf_writer.cpp
+    src/simulation/simulation.cu
   )
 
   target_include_directories(fluid_sim
     PRIVATE
-      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/src
       ${PROJECT_SOURCE_DIR}/libs/json/include
       ${HDF5_INCLUDE_DIRS}
   )

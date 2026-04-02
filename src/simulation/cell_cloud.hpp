@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fluid_sim/gpu_vector.hpp"
+#include "simulation/gpu_vector.hpp"
 
 #include <cuda_runtime.h>
 
@@ -37,6 +37,7 @@ struct CellCloud {
     size_x = new_size_x;
     size_y = new_size_y;
     const std::size_t count = cell_count();
+
     cell_state.resize(count);
     cell_state_tmp.resize(count);
     pressure.resize(count);
@@ -61,4 +62,4 @@ struct CellCloud {
   }
 };
 
-}  // namespace fluid_sim
+} // namespace fluid_sim

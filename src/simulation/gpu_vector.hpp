@@ -20,6 +20,7 @@ template <typename T>
 class GPUVector {
  public:
   GPUVector() = default;
+
   explicit GPUVector(std::size_t size) {
     resize(size);
   }
@@ -53,7 +54,8 @@ class GPUVector {
       return;
     }
 
-    ThrowIfCudaError(cudaMalloc(&data_, new_size * sizeof(T)), "cudaMalloc failed in GPUVector::resize");
+    ThrowIfCudaError(cudaMalloc(&data_, new_size * sizeof(T)),
+                     "cudaMalloc failed in GPUVector::resize");
     size_ = new_size;
   }
 
@@ -63,7 +65,8 @@ class GPUVector {
     }
 
     if (IsAllZero(value)) {
-      ThrowIfCudaError(cudaMemset(data_, 0, size_ * sizeof(T)), "cudaMemset failed in GPUVector::fill");
+      ThrowIfCudaError(cudaMemset(data_, 0, size_ * sizeof(T)),
+                       "cudaMemset failed in GPUVector::fill");
       return;
     }
 
@@ -102,9 +105,17 @@ class GPUVector {
     size_ = 0;
   }
 
-  [[nodiscard]] T* data() { return data_; }
-  [[nodiscard]] const T* data() const { return data_; }
-  [[nodiscard]] std::size_t size() const { return size_; }
+  [[nodiscard]] T* data() {
+    return data_;
+  }
+
+  [[nodiscard]] const T* data() const {
+    return data_;
+  }
+
+  [[nodiscard]] std::size_t size() const {
+    return size_;
+  }
 
  private:
   static bool IsAllZero(const T& value) {
@@ -138,4 +149,4 @@ std::vector<T> ToStdVector(const GPUVector<T>& device) {
   return device.to_std_vector();
 }
 
-}  // namespace fluid_sim
+} // namespace fluid_sim
