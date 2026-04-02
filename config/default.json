@@ -1,0 +1,19 @@
+{
+  "grid": {
+    "nx": 256,
+    "ny": 128,
+    "dx": 0.02,
+    "dy": 0.02
+  },
+  "simulation": {
+    "end_time": 10.0,
+    "cfl": 0.05,
+    "reference_density": 1.225,
+    "kinematic_viscosity": 0.000015,
+    "density_diffusivity": 0.00001,
+    "pressure_iterations": 60
+  },
+  "output": {
+    "output_interval": 1.0
+  }
+}
