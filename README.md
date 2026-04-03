@@ -6,74 +6,105 @@
 ./build/fluid_sim /mnt/c/Users/LeonidBraun/Downloads/test_sim/test_sim.json
 ```
 
-The solver reads one JSON config file, writes `outputs/series.xdmf`, and stores HDF5 frames under `outputs/data/` next to that config.
+The solver reads a run config JSON, an initial state JSON, and HDF5 frame data. It also writes `outputs/series.xdmf` for ParaView, but the simulation state is described by JSON files plus the referenced HDF5 frames.
 
-## Config
+## Data Model
 
-Top-level sections:
+The run config contains:
 
-- `grid`: `nx`, `ny`, `dx`, `dy`
-- `simulation`: `end_time`, `cfl`, `reference_density`, `kinematic_viscosity`, `density_diffusivity`, `pressure_iterations`
-- `output`: `output_interval`
+- `solver_settings`: `cfl`, `pressure_iterations`
+- `output_settings`: `end_time`, `output_interval`
+- `init_state`: path to the initial state JSON
+- `outputs`: paths to generated output state JSON files
 
 Example:
 
 ```json
 {
-  "grid": {
-    "nx": 256,
-    "ny": 128,
-    "dx": 0.02,
-    "dy": 0.02
+  "solver_settings": {
+    "cfl": 0.5,
+    "pressure_iterations": 600
   },
-  "simulation": {
+  "output_settings": {
     "end_time": 10.0,
-    "cfl": 0.05,
+    "output_interval": 0.1
+  },
+  "init_state": "init_state.json",
+  "outputs": [
+    "outputs/data/state_0.json",
+    "outputs/data/state_1.json"
+  ]
+}
+```
+
+The state JSON contains:
+
+- `time`
+- `grid`: `nx`, `ny`, `h`, `initial_density`
+- `material`: `reference_density`, `kinematic_viscosity`, `density_diffusivity`
+- `frame`: path to the HDF5 frame
+
+Example:
+
+```json
+{
+  "time": 0.0,
+  "grid": {
+    "nx": 400,
+    "ny": 200,
+    "h": 0.01,
+    "initial_density": 1.225
+  },
+  "material": {
     "reference_density": 1.225,
     "kinematic_viscosity": 0.000015,
-    "density_diffusivity": 0.00001,
-    "pressure_iterations": 60
+    "density_diffusivity": 0.00001
   },
-  "output": {
-    "output_interval": 1.0
-  }
+  "frame": "init_frame.h5"
 }
 ```
 
 Units are SI:
 
-- `dx`, `dy` in `m`
-- `end_time`, `output_interval` in `s`
+- `h` in `m`
+- `time`, `end_time`, `output_interval` in `s`
 - `velocity` in `m/s`
-- `reference_density` and `density_offset` in `kg/m^3`
+- `initial_density`, `reference_density`, and `density_offset` in `kg/m^3`
 - `kinematic_viscosity` and `density_diffusivity` in `m^2/s`
 
-The runner rejects the legacy keys `steps`, `dt`, `output_every`, `viscosity`, `density_diffusion`, and `density_decay`.
+The C++ loader accepts `//` line comments and trailing commas in these JSON files.
 
 ## Python Pre/Postprocessing
 
 The repo now includes `fluid_sim_io.py`, a small Python helper for:
 
-- creating and validating JSON configs with the same defaults as the solver
-- listing output frames from `outputs/series.xdmf`
-- reading `outputs/data/frame_XXXX.h5` into NumPy arrays for analysis
+- creating and validating the run config plus initial state files
+- reading output states from the run config `outputs` list or from `outputs/data/state_*.json`
+- loading the referenced HDF5 frame data into NumPy arrays
 
 Example:
 
 ```python
 from fluid_sim_io import FluidSimIO
 
-case = FluidSimIO("cases/demo/default.json")
-case.set_grid(nx=512, ny=256, dx=0.01, dy=0.01)
-case.set_simulation(end_time=5.0, cfl=0.1)
-case.write_config()
+case = FluidSimIO("test_sim.json")
+case.set_solver(cfl=0.5, pressure_iterations=600)
+case.set_output(end_time=10.0, output_interval=0.1)
+case.set_grid(nx=400, ny=200, h=0.01, initial_density=1.225)
+case.set_material(
+    reference_density=1.225,
+    kinematic_viscosity=1.0e-5,
+    density_diffusivity=1.0e-5,
+)
+case.write_case()
 
-frame = case.read_last_frame()
-print(frame.time)
-print(frame.density_offset.shape)  # (ny, nx)
-print(frame.velocity.shape)        # (ny, nx, 3)
+initial = case.read_initial_state()
+latest = case.read_last_state()
+print(initial.time)
+print(latest.density_offset.shape)  # (ny, nx)
+print(latest.velocity.shape)        # (ny, nx, 3)
 
 x, y = case.cell_centers()
 ```
 
-Reading output frames requires `numpy` and `h5py` in the Python environment you use for postprocessing.
+Reading HDF5 frames requires `numpy` and `h5py` in the Python environment you use for postprocessing.

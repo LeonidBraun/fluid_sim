@@ -29,3 +29,8 @@ SpacesInSquareBrackets: false
 
 Cpp11BracedListStyle: true
 ReflowComments: false
+
+AlwaysBreakTemplateDeclarations: Yes
+PenaltyBreakTemplateDeclaration: 0
+
+# BreakBeforeBraces: Allman

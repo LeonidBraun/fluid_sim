@@ -1,13 +1,18 @@
-#include "io/hdf5_writer.hpp"
+#include "hdf5_writer.hpp"
+#include "simulation_types.hpp"
 
 #include <hdf5.h>
 
 #include <array>
+#include <chrono>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <unistd.h>
+#include <vector>
 
-namespace fluid_sim {
-namespace {
+namespace io {
 
 void check_hdf5(herr_t status, const char* message) {
   if (status < 0) {
@@ -16,11 +21,13 @@ void check_hdf5(herr_t status, const char* message) {
 }
 
 class H5Handle {
- public:
+public:
   using CloseFunction = herr_t (*)(hid_t);
 
   H5Handle() = default;
-  H5Handle(hid_t id, CloseFunction close_fn) : id_(id), close_fn_(close_fn) {}
+  H5Handle(hid_t id, CloseFunction close_fn)
+      : id_(id),
+        close_fn_(close_fn) {}
 
   ~H5Handle() {
     if (id_ >= 0 && close_fn_ != nullptr) {
@@ -31,7 +38,9 @@ class H5Handle {
   H5Handle(const H5Handle&) = delete;
   H5Handle& operator=(const H5Handle&) = delete;
 
-  H5Handle(H5Handle&& other) noexcept : id_(other.id_), close_fn_(other.close_fn_) {
+  H5Handle(H5Handle&& other) noexcept
+      : id_(other.id_),
+        close_fn_(other.close_fn_) {
     other.id_ = -1;
     other.close_fn_ = nullptr;
   }
@@ -53,42 +62,27 @@ class H5Handle {
     return id_;
   }
 
- private:
+private:
   hid_t id_ = -1;
   CloseFunction close_fn_ = nullptr;
 };
 
-void write_scalar_attribute(hid_t object, const char* name, double value) {
-  H5Handle dataspace(H5Screate(H5S_SCALAR), H5Sclose);
-  if (dataspace.get() < 0) {
-    throw std::runtime_error("Unable to create HDF5 scalar dataspace.");
-  }
-
-  H5Handle attribute(H5Acreate2(object, name, H5T_NATIVE_DOUBLE, dataspace.get(), H5P_DEFAULT,
-                                H5P_DEFAULT),
-                     H5Aclose);
-  if (attribute.get() < 0) {
-    throw std::runtime_error(std::string("Unable to create HDF5 attribute: ") + name);
-  }
-
-  check_hdf5(H5Awrite(attribute.get(), H5T_NATIVE_DOUBLE, &value),
-             "Unable to write double attribute.");
+bool IsMountedWindowsPath(const std::filesystem::path& path) {
+  const std::string text = path.generic_string();
+  return text.rfind("/mnt/", 0) == 0;
 }
 
-void write_scalar_attribute(hid_t object, const char* name, int value) {
-  H5Handle dataspace(H5Screate(H5S_SCALAR), H5Sclose);
-  if (dataspace.get() < 0) {
-    throw std::runtime_error("Unable to create HDF5 scalar dataspace.");
+std::filesystem::path MakeTempCopyIfNeeded(const std::filesystem::path& input_path) {
+  if (!IsMountedWindowsPath(input_path)) {
+    return input_path;
   }
 
-  H5Handle attribute(H5Acreate2(object, name, H5T_NATIVE_INT, dataspace.get(), H5P_DEFAULT,
-                                H5P_DEFAULT),
-                     H5Aclose);
-  if (attribute.get() < 0) {
-    throw std::runtime_error(std::string("Unable to create HDF5 attribute: ") + name);
-  }
-
-  check_hdf5(H5Awrite(attribute.get(), H5T_NATIVE_INT, &value), "Unable to write int attribute.");
+  const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+  const std::filesystem::path temp_path =
+      std::filesystem::temp_directory_path() / ("fluid_sim_init_" + std::to_string(static_cast<long long>(::getpid())) +
+                                                "_" + std::to_string(static_cast<long long>(stamp)) + ".h5");
+  std::filesystem::copy_file(input_path, temp_path, std::filesystem::copy_options::overwrite_existing);
+  return temp_path;
 }
 
 void write_scalar_dataset(hid_t file, const char* name, int nx, int ny, const std::vector<float>& values) {
@@ -98,9 +92,8 @@ void write_scalar_dataset(hid_t file, const char* name, int nx, int ny, const st
     throw std::runtime_error("Unable to create HDF5 dataspace.");
   }
 
-  H5Handle dataset(
-      H5Dcreate2(file, name, H5T_NATIVE_FLOAT, dataspace.get(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
-      H5Dclose);
+  H5Handle dataset(H5Dcreate2(file, name, H5T_NATIVE_FLOAT, dataspace.get(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                   H5Dclose);
   if (dataset.get() < 0) {
     throw std::runtime_error(std::string("Unable to create dataset: ") + name);
   }
@@ -116,9 +109,8 @@ void write_vector_dataset(hid_t file, const char* name, int nx, int ny, const st
     throw std::runtime_error("Unable to create HDF5 vector dataspace.");
   }
 
-  H5Handle dataset(
-      H5Dcreate2(file, name, H5T_NATIVE_FLOAT, dataspace.get(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
-      H5Dclose);
+  H5Handle dataset(H5Dcreate2(file, name, H5T_NATIVE_FLOAT, dataspace.get(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                   H5Dclose);
   if (dataset.get() < 0) {
     throw std::runtime_error(std::string("Unable to create dataset: ") + name);
   }
@@ -127,13 +119,19 @@ void write_vector_dataset(hid_t file, const char* name, int nx, int ny, const st
              "Unable to write vector dataset.");
 }
 
-} // namespace
+std::vector<float> read_dataset(hid_t file, const char* name, std::size_t expected_size) {
+  H5Handle dataset(H5Dopen2(file, name, H5P_DEFAULT), H5Dclose);
+  if (dataset.get() < 0) {
+    throw std::runtime_error(std::string("Unable to open dataset: ") + name);
+  }
 
-void write_frame_hdf5(const std::filesystem::path& output_path,
-                      const SimulationConfig& config,
-                      double time,
-                      double time_step,
-                      const HostState& state) {
+  std::vector<float> values(expected_size);
+  check_hdf5(H5Dread(dataset.get(), H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data()),
+             "Unable to read dataset.");
+  return values;
+}
+
+void write_frame_hdf5(const std::filesystem::path& output_path, const io::Frame& state) {
   const std::size_t expected_size = static_cast<std::size_t>(config.nx) * static_cast<std::size_t>(config.ny);
   if (state.density_offset.size() != expected_size || state.velocity.size() != expected_size * 3U) {
     throw std::runtime_error("HostState size does not match simulation dimensions.");
@@ -144,21 +142,37 @@ void write_frame_hdf5(const std::filesystem::path& output_path,
     throw std::runtime_error("Unable to create HDF5 output file.");
   }
 
-  write_scalar_attribute(file.get(), "time", time);
-  write_scalar_attribute(file.get(), "time_step", time_step);
-  write_scalar_attribute(file.get(), "end_time", config.end_time);
-  write_scalar_attribute(file.get(), "cfl", config.cfl);
-  write_scalar_attribute(file.get(), "output_interval", config.output_interval);
-  write_scalar_attribute(file.get(), "reference_density", config.reference_density);
-  write_scalar_attribute(file.get(), "kinematic_viscosity", config.kinematic_viscosity);
-  write_scalar_attribute(file.get(), "density_diffusivity", config.density_diffusivity);
-  write_scalar_attribute(file.get(), "nx", config.nx);
-  write_scalar_attribute(file.get(), "ny", config.ny);
-  write_scalar_attribute(file.get(), "dx", config.dx);
-  write_scalar_attribute(file.get(), "dy", config.dy);
-
   write_scalar_dataset(file.get(), "density_offset", config.nx, config.ny, state.density_offset);
   write_vector_dataset(file.get(), "velocity", config.nx, config.ny, state.velocity);
 }
 
-} // namespace fluid_sim
+io::Frame read_frame_hdf5(const std::filesystem::path& input_path, int nx, int ny) {
+  const std::filesystem::path local_input_path = MakeTempCopyIfNeeded(input_path);
+
+  try {
+    H5Handle file(H5Fopen(local_input_path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose);
+    if (file.get() < 0) {
+      throw std::runtime_error("Unable to open HDF5 input file: " + local_input_path.string());
+    }
+
+    const std::size_t cell_count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
+    io::Frame frame;
+    frame.density_offset = read_dataset(file.get(), "density_offset", cell_count);
+    frame.velocity = read_dataset(file.get(), "velocity", cell_count * 3U);
+
+    if (local_input_path != input_path) {
+      std::error_code cleanup_error;
+      std::filesystem::remove(local_input_path, cleanup_error);
+    }
+
+    return frame;
+  } catch (...) {
+    if (local_input_path != input_path) {
+      std::error_code cleanup_error;
+      std::filesystem::remove(local_input_path, cleanup_error);
+    }
+    throw;
+  }
+}
+
+} // namespace io

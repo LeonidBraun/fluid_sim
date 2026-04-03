@@ -15,50 +15,41 @@ struct CellState {
 };
 
 struct CellCloudView {
-  uint32_t size_x = 0;
-  uint32_t size_y = 0;
+  uint32_t s_x = 0;
+  uint32_t s_y = 0;
+  float kin_visc = 0.001f;
+  float dty_visc = 0.001f;
+  float ref_dty = 1.225;
   CellState* cell_state = nullptr;
   CellState* cell_state_tmp = nullptr;
-  float* pressure = nullptr;
-  float* pressure_tmp = nullptr;
-  float* divergence = nullptr;
+  [[nodiscard]] uint32_t size() const {
+    return s_x * s_y;
+  }
 };
 
 struct CellCloud {
-  uint32_t size_x = 0;
-  uint32_t size_y = 0;
+  uint32_t s_x = 0;
+  uint32_t s_y = 0;
+  float kin_visc = 0.001f;
+  float dty_visc = 0.001f;
+  float ref_dty = 1.225;
   GPUVector<CellState> cell_state;
   GPUVector<CellState> cell_state_tmp;
-  GPUVector<float> pressure;
-  GPUVector<float> pressure_tmp;
-  GPUVector<float> divergence;
 
-  void resize(uint32_t new_size_x, uint32_t new_size_y) {
-    size_x = new_size_x;
-    size_y = new_size_y;
-    const std::size_t count = cell_count();
+  void resize(const uint32_t new_size_x, const uint32_t new_size_y) {
+    s_x = new_size_x;
+    s_y = new_size_y;
 
-    cell_state.resize(count);
-    cell_state_tmp.resize(count);
-    pressure.resize(count);
-    pressure_tmp.resize(count);
-    divergence.resize(count);
-
-    const CellState zero_state{};
-    cell_state.fill(zero_state);
-    cell_state_tmp.fill(zero_state);
-    pressure.fill(0.0f);
-    pressure_tmp.fill(0.0f);
-    divergence.fill(0.0f);
+    cell_state.resize(size());
+    cell_state_tmp.resize(size());
   }
 
-  [[nodiscard]] std::size_t cell_count() const {
-    return static_cast<std::size_t>(size_x) * static_cast<std::size_t>(size_y);
+  [[nodiscard]] size_t size() const {
+    return static_cast<size_t>(s_x) * static_cast<size_t>(s_y);
   }
 
   [[nodiscard]] CellCloudView view() {
-    return CellCloudView{size_x, size_y, cell_state.data(), cell_state_tmp.data(), pressure.data(),
-                         pressure_tmp.data(), divergence.data()};
+    return CellCloudView{s_x, s_y, kin_visc, dty_visc, ref_dty, cell_state.data(), cell_state_tmp.data()};
   }
 };
 

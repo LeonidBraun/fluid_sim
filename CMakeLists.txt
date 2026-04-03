@@ -10,6 +10,25 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(HDF5 REQUIRED COMPONENTS C)
 
+add_executable(fluid_frame_dump
+  src/io/frame_dump.cpp
+  src/io/hdf5_writer.cpp
+)
+
+target_include_directories(fluid_frame_dump
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/libs/json/include
+    ${HDF5_INCLUDE_DIRS}
+)
+
+target_link_libraries(fluid_frame_dump
+  PRIVATE
+    ${HDF5_LIBRARIES}
+)
+
+target_compile_features(fluid_frame_dump PRIVATE cxx_std_17)
+
 check_language(CUDA)
 
 if(CMAKE_CUDA_COMPILER)

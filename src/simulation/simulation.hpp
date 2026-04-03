@@ -8,8 +8,8 @@
 namespace fluid_sim {
 
 class Simulation {
- public:
-  explicit Simulation(const SimulationConfig& config);
+public:
+  Simulation(const SimulationConfig& config, const HostState& initial_state, const double initial_time);
   ~Simulation() = default;
 
   Simulation(const Simulation&) = delete;
@@ -34,7 +34,7 @@ class Simulation {
     return last_dt_;
   }
 
- private:
+private:
   [[nodiscard]] double compute_time_step() const;
 
   SimulationConfig config_{};

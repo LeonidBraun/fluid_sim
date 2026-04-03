@@ -23,15 +23,14 @@ void write_xdmf_series(const std::filesystem::path& output_path,
 
   for (std::size_t i = 0; i < frames.size(); ++i) {
     const auto& frame = frames[i];
-    stream << "      <Grid Name=\"frame_" << std::setw(4) << std::setfill('0') << i
-           << "\" GridType=\"Uniform\">\n";
+    stream << "      <Grid Name=\"frame_" << i << "\" GridType=\"Uniform\">\n";
     stream << "        <Time Value=\"" << frame.time << "\"/>\n";
     stream << "        <Topology TopologyType=\"3DCoRectMesh\" Dimensions=\"2 "
            << (config.ny + 1) << ' ' << (config.nx + 1) << "\"/>\n";
     stream << "        <Geometry GeometryType=\"ORIGIN_DXDYDZ\">\n";
     stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">0 0 0</DataItem>\n";
     stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">1 "
-           << config.dy << ' ' << config.dx << "</DataItem>\n";
+           << config.h << ' ' << config.h << "</DataItem>\n";
     stream << "        </Geometry>\n";
     stream << "        <Attribute Name=\"density_offset\" AttributeType=\"Scalar\" Center=\"Cell\">\n";
     stream << "          <DataItem Dimensions=\"1 " << config.ny << ' ' << config.nx
