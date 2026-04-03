@@ -15,41 +15,61 @@ struct CellState {
 };
 
 struct CellCloudView {
-  uint32_t s_x = 0;
-  uint32_t s_y = 0;
-  float kin_visc = 0.001f;
-  float dty_visc = 0.001f;
-  float ref_dty = 1.225;
+  uint32_t size_x = 0;
+  uint32_t size_y = 0;
   CellState* cell_state = nullptr;
   CellState* cell_state_tmp = nullptr;
-  [[nodiscard]] uint32_t size() const {
-    return s_x * s_y;
-  }
+  float* pressure = nullptr;
+  float* pressure_tmp = nullptr;
+  float* divergence = nullptr;
+
+  float h = 1.0;
+  float kin_visc = 0.0;
+  float dty_visc = 0.0;
+  float ref_dty = 0.0;
 };
 
 struct CellCloud {
-  uint32_t s_x = 0;
-  uint32_t s_y = 0;
-  float kin_visc = 0.001f;
-  float dty_visc = 0.001f;
-  float ref_dty = 1.225;
+  uint32_t size_x = 0;
+  uint32_t size_y = 0;
   GPUVector<CellState> cell_state;
   GPUVector<CellState> cell_state_tmp;
+  GPUVector<float> pressure;
+  GPUVector<float> pressure_tmp;
+  GPUVector<float> divergence;
+
+  float h;
+  float kin_visc;
+  float dty_visc;
+  float ref_dty;
 
   void resize(const uint32_t new_size_x, const uint32_t new_size_y) {
-    s_x = new_size_x;
-    s_y = new_size_y;
+    size_x = new_size_x;
+    size_y = new_size_y;
 
     cell_state.resize(size());
     cell_state_tmp.resize(size());
+    pressure.resize(size());
+    pressure_tmp.resize(size());
+    divergence.resize(size());
   }
 
-  [[nodiscard]] size_t size() const {
-    return static_cast<size_t>(s_x) * static_cast<size_t>(s_y);
+  [[nodiscard]] std::size_t size() const {
+    return static_cast<std::size_t>(size_x) * static_cast<std::size_t>(size_y);
   }
 
   [[nodiscard]] CellCloudView view() {
-    return CellCloudView{s_x, s_y, kin_visc, dty_visc, ref_dty, cell_state.data(), cell_state_tmp.data()};
+    return CellCloudView{size_x,
+                         size_y,
+                         cell_state.data(),
+                         cell_state_tmp.data(),
+                         pressure.data(),
+                         pressure_tmp.data(),
+                         divergence.data(),
+                         h,
+                         kin_visc,
+                         dty_visc,
+                         ref_dty};
   }
 };
 

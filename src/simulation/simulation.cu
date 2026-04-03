@@ -288,38 +288,35 @@ __global__ void project_velocity_kernel(CellCloudView cloud, float h) {
 
 } // namespace
 
-Simulation::Simulation(const SimulationConfig& config, const HostState& initial_state, const double initial_time)
-    : config_(config) {
-
-  time_ = initial_time;
-
-  if (config_.nx < 2 || config_.ny < 2) {
+Simulation::Simulation(const io::RunConfig::SolverSettings& settings, const io::State& initial_state)
+    : settings_(settings),
+      time_(initial_state.time) {
+  if (initial_state.grid.nx < 2 || initial_state.grid.ny < 2) {
     throw std::runtime_error("Simulation dimensions must be at least 2x2.");
   }
 
-  const size_t expected_size = static_cast<std::size_t>(config_.nx) * static_cast<std::size_t>(config_.ny);
-  if (initial_state.density_offset.size() != expected_size || initial_state.velocity.size() != expected_size * 3U) {
-    throw std::runtime_error("Initial state size does not match simulation dimensions.");
+  cloud_.resize(static_cast<uint32_t>(initial_state.grid.nx), static_cast<uint32_t>(initial_state.grid.ny));
+
+  cloud_.h = initial_state.grid.h;
+  cloud_.kin_visc = initial_state.material.kinematic_viscosity;
+  cloud_.dty_visc = initial_state.material.density_diffusivity;
+  cloud_.ref_dty = initial_state.material.reference_density;
+
+  if (initial_state.grid.frame.has_value()) {
+    const io::Frame& frame = initial_state.grid.frame->data;
+    if (frame.density_offset.size() != cloud_.size() || frame.velocity.size() != cloud_.size() * 3U) {
+      throw std::runtime_error("Initial state size does not match simulation dimensions.");
+    }
+    std::vector<CellState> device_state(cloud_.size());
+    for (std::size_t i = 0; i < cloud_.size(); ++i) {
+      device_state[i].density_offset = frame.density_offset[i];
+      device_state[i].velocity =
+          make_float3(frame.velocity[i * 3U], frame.velocity[i * 3U + 1U], frame.velocity[i * 3U + 2U]);
+    }
+    cloud_.cell_state.assign(device_state);
   }
 
-  cloud_.resize(static_cast<uint32_t>(config_.nx), static_cast<uint32_t>(config_.ny));
-
-  cloud_.kin_visc = config.kinematic_viscosity;
-  cloud_.dty_visc = config.density_diffusivity;
-
-  std::vector<CellState> device_state(cloud_.size());
-  for (std::size_t i = 0; i < expected_size; ++i) {
-    device_state[i].density_offset = initial_state.density_offset[i];
-    device_state[i].velocity = make_float3(
-        initial_state.velocity[i * 3U], initial_state.velocity[i * 3U + 1U], initial_state.velocity[i * 3U + 2U]);
-  }
-
-  cloud_.cell_state.assign(device_state);
   cloud_.cell_state_tmp.fill(CellState{});
-}
-
-std::size_t Simulation::cell_count() const {
-  return cloud_.cell_count();
 }
 
 double Simulation::compute_time_step() const {
@@ -329,67 +326,63 @@ double Simulation::compute_time_step() const {
       thrust::transform_reduce(thrust::device, begin, end, MaxAbsVelocity{}, 0.0f, thrust::maximum<float>{});
 
   const double characteristic_speed = std::max(static_cast<double>(max_speed), 1.0);
-  return config_.cfl * config_.h / characteristic_speed;
+  return settings_.cfl * cloud_.h / characteristic_speed;
 }
 
 void Simulation::step(double max_dt) {
   const double current_dt = std::min(compute_time_step(), max_dt);
   const float dt = static_cast<float>(current_dt);
   const float current_time = static_cast<float>(time_);
-  const float h = static_cast<float>(config_.h);
-  const float kinematic_viscosity = static_cast<float>(config_.kinematic_viscosity);
-  const float density_diffusivity = static_cast<float>(config_.density_diffusivity);
-  const float reference_density = static_cast<float>(config_.reference_density);
 
   const LaunchConfig launch = make_launch_config();
   CellCloudView cloud = cloud_.view();
 
-  add_source_kernel<<<launch.grid, launch.block>>>(cloud, dt, current_time, h, reference_density);
+  add_source_kernel<<<launch.grid, launch.block>>>(cloud, dt, current_time, cloud_.h, cloud_.ref_dty);
 
   diffuse_state_kernel<<<launch.grid, launch.block>>>(
-      cloud, dt, h, kinematic_viscosity, density_diffusivity, reference_density);
+      cloud, dt, cloud.h, cloud.kin_visc, cloud.dty_visc, cloud.ref_dty);
   std::swap(cloud_.cell_state, cloud_.cell_state_tmp);
   cloud = cloud_.view();
 
-  advect_state_kernel<<<launch.grid, launch.block>>>(cloud, dt, h, reference_density);
+  advect_state_kernel<<<launch.grid, launch.block>>>(cloud, dt, cloud.h, cloud.ref_dty);
   std::swap(cloud_.cell_state, cloud_.cell_state_tmp);
   cloud = cloud_.view();
 
   apply_boundary_kernel<<<launch.grid, launch.block>>>(cloud);
 
-  compute_divergence_kernel<<<launch.grid, launch.block>>>(cloud, h);
+  compute_divergence_kernel<<<launch.grid, launch.block>>>(cloud, cloud.h);
 
   clear_scalar_kernel<<<launch.grid, launch.block>>>(cloud, cloud.pressure);
   clear_scalar_kernel<<<launch.grid, launch.block>>>(cloud, cloud.pressure_tmp);
 
-  for (int iter = 0; iter < config_.pressure_iterations; ++iter) {
-    pressure_jacobi_kernel<<<launch.grid, launch.block>>>(cloud, h);
+  for (int iter = 0; iter < settings_.pressure_iterations; ++iter) {
+    pressure_jacobi_kernel<<<launch.grid, launch.block>>>(cloud, cloud.h);
     std::swap(cloud_.pressure, cloud_.pressure_tmp);
     cloud = cloud_.view();
   }
-  project_velocity_kernel<<<launch.grid, launch.block>>>(cloud, h);
+  project_velocity_kernel<<<launch.grid, launch.block>>>(cloud, cloud.h);
   apply_boundary_kernel<<<launch.grid, launch.block>>>(cloud);
 
   last_dt_ = current_dt;
   time_ += current_dt;
 }
 
-HostState Simulation::download_state() const {
+io::Frame Simulation::download_frame() const {
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
-  HostState host_state;
+  io::Frame frame;
   const auto device_state = ToStdVector(cloud_.cell_state);
-  host_state.density_offset.resize(device_state.size());
-  host_state.velocity.resize(device_state.size() * 3U);
+  frame.density_offset.resize(device_state.size());
+  frame.velocity.resize(device_state.size() * 3U);
 
   for (size_t i = 0; i < device_state.size(); ++i) {
-    host_state.density_offset[i] = device_state[i].density_offset;
-    host_state.velocity[i * 3U] = device_state[i].velocity.x;
-    host_state.velocity[i * 3U + 1U] = device_state[i].velocity.y;
-    host_state.velocity[i * 3U + 2U] = device_state[i].velocity.z;
+    frame.density_offset[i] = device_state[i].density_offset;
+    frame.velocity[i * 3U] = device_state[i].velocity.x;
+    frame.velocity[i * 3U + 1U] = device_state[i].velocity.y;
+    frame.velocity[i * 3U + 2U] = device_state[i].velocity.z;
   }
 
-  return host_state;
+  return frame;
 }
 
 } // namespace fluid_sim

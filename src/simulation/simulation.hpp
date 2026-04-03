@@ -1,7 +1,7 @@
 #pragma once
 
+#include "io/simulation_types.hpp"
 #include "simulation/cell_cloud.hpp"
-#include "simulation/simulation_types.hpp"
 
 #include <cstddef>
 
@@ -9,7 +9,7 @@ namespace fluid_sim {
 
 class Simulation {
 public:
-  Simulation(const SimulationConfig& config, const HostState& initial_state, const double initial_time);
+  Simulation(const io::RunConfig::SolverSettings& settings, const io::State& initial_state);
   ~Simulation() = default;
 
   Simulation(const Simulation&) = delete;
@@ -18,13 +18,11 @@ public:
   Simulation& operator=(Simulation&&) = delete;
 
   void step(double max_dt);
-  [[nodiscard]] HostState download_state() const;
+  [[nodiscard]] io::Frame download_frame() const;
 
-  [[nodiscard]] const SimulationConfig& config() const {
-    return config_;
+  [[nodiscard]] const io::RunConfig::SolverSettings& settings() const {
+    return settings_;
   }
-
-  [[nodiscard]] std::size_t cell_count() const;
 
   [[nodiscard]] double time() const {
     return time_;
@@ -37,7 +35,7 @@ public:
 private:
   [[nodiscard]] double compute_time_step() const;
 
-  SimulationConfig config_{};
+  io::RunConfig::SolverSettings settings_{};
   double time_ = 0.0;
   double last_dt_ = 0.0;
   CellCloud cloud_{};

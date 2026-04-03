@@ -7,7 +7,7 @@
 namespace fluid_sim {
 
 void write_xdmf_series(const std::filesystem::path& output_path,
-                       const SimulationConfig& config,
+                       const io::State& state,
                        const std::vector<SavedFrame>& frames) {
   std::ofstream stream(output_path);
   if (!stream) {
@@ -26,19 +26,19 @@ void write_xdmf_series(const std::filesystem::path& output_path,
     stream << "      <Grid Name=\"frame_" << i << "\" GridType=\"Uniform\">\n";
     stream << "        <Time Value=\"" << frame.time << "\"/>\n";
     stream << "        <Topology TopologyType=\"3DCoRectMesh\" Dimensions=\"2 "
-           << (config.ny + 1) << ' ' << (config.nx + 1) << "\"/>\n";
+           << (state.grid.ny + 1) << ' ' << (state.grid.nx + 1) << "\"/>\n";
     stream << "        <Geometry GeometryType=\"ORIGIN_DXDYDZ\">\n";
     stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">0 0 0</DataItem>\n";
     stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">1 "
-           << config.h << ' ' << config.h << "</DataItem>\n";
+           << state.grid.h << ' ' << state.grid.h << "</DataItem>\n";
     stream << "        </Geometry>\n";
     stream << "        <Attribute Name=\"density_offset\" AttributeType=\"Scalar\" Center=\"Cell\">\n";
-    stream << "          <DataItem Dimensions=\"1 " << config.ny << ' ' << config.nx
+    stream << "          <DataItem Dimensions=\"1 " << state.grid.ny << ' ' << state.grid.nx
            << "\" NumberType=\"Float\" Precision=\"4\" Format=\"HDF\">"
            << frame.file_name << ":/density_offset</DataItem>\n";
     stream << "        </Attribute>\n";
     stream << "        <Attribute Name=\"velocity\" AttributeType=\"Vector\" Center=\"Cell\">\n";
-    stream << "          <DataItem Dimensions=\"1 " << config.ny << ' ' << config.nx
+    stream << "          <DataItem Dimensions=\"1 " << state.grid.ny << ' ' << state.grid.nx
            << " 3\" NumberType=\"Float\" Precision=\"4\" Format=\"HDF\">"
            << frame.file_name << ":/velocity</DataItem>\n";
     stream << "        </Attribute>\n";

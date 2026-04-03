@@ -1,7 +1,7 @@
 #pragma once
 
-#include "simulation_types.hpp"
-#include "xdmf_writer.hpp"
+#include "io/simulation_types.hpp"
+#include "io/xdmf_writer.hpp"
 
 #include <filesystem>
 #include <iosfwd>
@@ -15,36 +15,39 @@ class IO {
 public:
   explicit IO(const std::filesystem::path& config_path);
 
-  [[nodiscard]] const SimulationConfig& config() const {
-    return config_;
+  [[nodiscard]] const io::RunConfig::SolverSettings& settings() const {
+    return run_config_.solver_settings;
   }
 
-  [[nodiscard]] const HostState& initial_state() const {
-    return initial_state_;
+  [[nodiscard]] const io::RunConfig::OutputSettings& output_settings() const {
+    return run_config_.output_settings;
+  }
+
+  [[nodiscard]] const io::State& initial_state() const {
+    return init_state_;
   }
 
   [[nodiscard]] double initial_time() const {
-    return init_state_file_.time;
+    return init_state_.time;
   }
 
   [[nodiscard]] double last_saved_time() const;
+
   [[nodiscard]] std::size_t last_output() const {
     return saved_frames_.empty() ? 0U : saved_frames_.size() - 1U;
   }
 
-  void save_frame(const Simulation& simulation);
+  void save_output(const Simulation& simulation);
 
   static void PrintUsage(std::ostream& stream);
 
 private:
   static io::RunConfig LoadRunConfig(const std::filesystem::path& config_path);
-  static io::StateFile LoadStateFile(const std::filesystem::path& state_path);
-  static io::Frame LoadFrameFile(const std::filesystem::path& frame_path);
-
-  static void ValidateRunConfig(const RunConfig& run_config, const StateFile& init_state);
-  static void WriteRunConfig(const std::filesystem::path& config_path, const RunConfig& run_config);
-  static void WriteStateFile(const std::filesystem::path& state_path, const StateFile& state_file);
-  static HostState LoadFrameState(const std::filesystem::path& frame_path, int nx, int ny);
+  static io::State LoadStateFile(const std::filesystem::path& state_path);
+  static io::Frame LoadFrameFile(const std::filesystem::path& frame_path, int nx, int ny);
+  static void ValidateRunConfig(const io::RunConfig& run_config, const io::State& init_state);
+  static void WriteRunConfig(const std::filesystem::path& config_path, const io::RunConfig& run_config);
+  static void WriteStateFile(const std::filesystem::path& state_path, const io::State& state);
 
   std::filesystem::path config_path_;
   std::filesystem::path root_path_;
@@ -52,6 +55,7 @@ private:
   std::filesystem::path data_dir_;
   io::RunConfig run_config_{};
   io::State init_state_{};
+  std::vector<SavedFrame> saved_frames_{};
 };
 
 } // namespace fluid_sim
