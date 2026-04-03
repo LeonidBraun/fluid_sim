@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/vector.hpp"
 #include "simulation/gpu_vector.hpp"
 
 #include <cuda_runtime.h>
@@ -11,7 +12,7 @@ namespace fluid_sim {
 
 struct CellState {
   float density_offset = 0.0f;
-  float3 momentum = make_float3(0.0f, 0.0f, 0.0f);
+  V3 momentum = V3(0.0f, 0.0f, 0.0f);
 };
 
 struct CellCloudView {
@@ -23,6 +24,7 @@ struct CellCloudView {
   float kin_visc = 0.0;
   float dty_visc = 0.0;
   float ref_dty = 0.0;
+  float sos = 0.0;
 };
 
 struct CellCloud {
@@ -35,6 +37,7 @@ struct CellCloud {
   float kin_visc;
   float dty_visc;
   float ref_dty;
+  float sos;
 
   void resize(const uint32_t new_size_x, const uint32_t new_size_y) {
     size_x = new_size_x;
@@ -49,7 +52,7 @@ struct CellCloud {
   }
 
   [[nodiscard]] CellCloudView view() {
-    return CellCloudView{size_x, size_y, cell_state.data(), cell_state_tmp.data(), h, kin_visc, dty_visc, ref_dty};
+    return CellCloudView{size_x, size_y, cell_state.data(), cell_state_tmp.data(), h, kin_visc, dty_visc, ref_dty, sos};
   }
 };
 
