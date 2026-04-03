@@ -11,7 +11,7 @@ namespace fluid_sim {
 
 struct CellState {
   float density_offset = 0.0f;
-  float3 velocity = make_float3(0.0f, 0.0f, 0.0f);
+  float3 momentum = make_float3(0.0f, 0.0f, 0.0f);
 };
 
 struct CellCloudView {
@@ -19,8 +19,6 @@ struct CellCloudView {
   uint32_t size_y = 0;
   CellState* cell_state = nullptr;
   CellState* cell_state_tmp = nullptr;
-  CellState* cell_state_flux = nullptr;
-
   float h = 1.0;
   float kin_visc = 0.0;
   float dty_visc = 0.0;
@@ -32,7 +30,6 @@ struct CellCloud {
   uint32_t size_y = 0;
   GPUVector<CellState> cell_state;
   GPUVector<CellState> cell_state_tmp;
-  GPUVector<CellState> cell_state_flux;
 
   float h;
   float kin_visc;
@@ -45,23 +42,14 @@ struct CellCloud {
 
     cell_state.resize(size());
     cell_state_tmp.resize(size());
-    cell_state_flux.resize(size());
   }
 
-  [[nodiscard]] std::size_t size() const {
-    return static_cast<std::size_t>(size_x) * static_cast<std::size_t>(size_y);
+  [[nodiscard]] uint32_t size() const {
+    return size_x * size_y;
   }
 
   [[nodiscard]] CellCloudView view() {
-    return CellCloudView{size_x,
-                         size_y,
-                         cell_state.data(),
-                         cell_state_tmp.data(),
-                         cell_state_flux.data(),
-                         h,
-                         kin_visc,
-                         dty_visc,
-                         ref_dty};
+    return CellCloudView{size_x, size_y, cell_state.data(), cell_state_tmp.data(), h, kin_visc, dty_visc, ref_dty};
   }
 };
 

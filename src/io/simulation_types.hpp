@@ -1,8 +1,8 @@
 #pragma once
 
 #include <filesystem>
-#include <string>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace io {
@@ -15,7 +15,7 @@ struct Filed {
 
 struct Frame {
   std::vector<float> density_offset;
-  std::vector<float> velocity;
+  std::vector<float> momentum;
 };
 
 struct State {

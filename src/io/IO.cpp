@@ -147,6 +147,15 @@ void RequireField(const json& object, const char* key, T& value, const char* sco
   value = transform(*it);
 }
 
+template <typename T, typename Transform>
+void OptionalField(
+    const json& object, const char* key, std::optional<T>& value, const char* scope, Transform&& transform) {
+  const auto it = object.find(key);
+  if (it == object.end() || it->is_null())
+    return;
+  value = transform(*it);
+}
+
 [[nodiscard]] std::filesystem::path ResolveSiblingPath(const std::filesystem::path& base_path,
                                                        const std::filesystem::path& relative_or_absolute) {
   if (relative_or_absolute.is_absolute()) {
@@ -299,17 +308,14 @@ io::State IO::LoadStateFile(const std::filesystem::path& state_path) {
   RequireField(grid, "nx", state.grid.nx, "grid");
   RequireField(grid, "ny", state.grid.ny, "grid");
   RequireField(grid, "h", state.grid.h, "grid");
-  RequireField(grid, "frame", state.grid.frame, "grid", [&state_path, &state](const json& value) {
+  OptionalField(grid, "frame", state.grid.frame, "grid", [&state_path, &state](const json& value) {
     const std::string file = value.get<std::string>();
     return std::optional<io::Filed<io::Frame>>{
         io::Filed<io::Frame>{file, LoadFrameFile(ResolveSiblingPath(state_path, file), state.grid.nx, state.grid.ny)}};
   });
 
   const json& material = RequireObject(document, "material", "state");
-  const auto speed_of_sound_it = material.find("speed_of_sound");
-  if (speed_of_sound_it != material.end() && !speed_of_sound_it->is_null()) {
-    state.material.speed_of_sound = speed_of_sound_it->get<double>();
-  }
+  RequireField(material, "speed_of_sound", state.material.speed_of_sound, "material");
   RequireField(material, "reference_density", state.material.reference_density, "material");
   RequireField(material, "kinematic_viscosity", state.material.kinematic_viscosity, "material");
   RequireField(material, "density_diffusivity", state.material.density_diffusivity, "material");
@@ -351,9 +357,6 @@ void IO::ValidateRunConfig(const io::RunConfig& run_config, const io::State& ini
   }
   if (init_state.material.density_diffusivity < 0.0) {
     throw std::runtime_error("material.density_diffusivity must be non-negative.");
-  }
-  if (!init_state.grid.frame.has_value()) {
-    throw std::runtime_error("State file must provide grid.frame.");
   }
 }
 

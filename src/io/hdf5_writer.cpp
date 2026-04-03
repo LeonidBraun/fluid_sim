@@ -150,7 +150,7 @@ void write_vector_dataset(hid_t file, const char* name, int nx, int ny, const st
 
 void write_frame_hdf5(const std::filesystem::path& output_path, int nx, int ny, const Frame& frame) {
   const std::size_t cell_count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
-  if (frame.density_offset.size() != cell_count || frame.velocity.size() != cell_count * 3U) {
+  if (frame.density_offset.size() != cell_count || frame.momentum.size() != cell_count * 3U) {
     throw std::runtime_error("Frame payload size does not match the target grid.");
   }
 
@@ -160,7 +160,7 @@ void write_frame_hdf5(const std::filesystem::path& output_path, int nx, int ny, 
   }
 
   write_scalar_dataset(file.get(), "density_offset", nx, ny, frame.density_offset);
-  write_vector_dataset(file.get(), "velocity", nx, ny, frame.velocity);
+  write_vector_dataset(file.get(), "momentum", nx, ny, frame.momentum);
 }
 
 Frame read_frame_hdf5(const std::filesystem::path& input_path, int nx, int ny) {
@@ -176,7 +176,7 @@ Frame read_frame_hdf5(const std::filesystem::path& input_path, int nx, int ny) {
     const std::size_t cell_count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
     Frame frame;
     frame.density_offset = read_dataset(file.get(), "density_offset", cell_count);
-    frame.velocity = read_dataset(file.get(), "velocity", cell_count * 3U);
+    frame.momentum = read_dataset(file.get(), "momentum", cell_count * 3U);
 
     CleanupTempFile(input_path, local_input_path);
     return frame;
