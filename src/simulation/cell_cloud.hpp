@@ -19,9 +19,7 @@ struct CellCloudView {
   uint32_t size_y = 0;
   CellState* cell_state = nullptr;
   CellState* cell_state_tmp = nullptr;
-  float* pressure = nullptr;
-  float* pressure_tmp = nullptr;
-  float* divergence = nullptr;
+  CellState* cell_state_flux = nullptr;
 
   float h = 1.0;
   float kin_visc = 0.0;
@@ -34,9 +32,7 @@ struct CellCloud {
   uint32_t size_y = 0;
   GPUVector<CellState> cell_state;
   GPUVector<CellState> cell_state_tmp;
-  GPUVector<float> pressure;
-  GPUVector<float> pressure_tmp;
-  GPUVector<float> divergence;
+  GPUVector<CellState> cell_state_flux;
 
   float h;
   float kin_visc;
@@ -49,9 +45,7 @@ struct CellCloud {
 
     cell_state.resize(size());
     cell_state_tmp.resize(size());
-    pressure.resize(size());
-    pressure_tmp.resize(size());
-    divergence.resize(size());
+    cell_state_flux.resize(size());
   }
 
   [[nodiscard]] std::size_t size() const {
@@ -63,9 +57,7 @@ struct CellCloud {
                          size_y,
                          cell_state.data(),
                          cell_state_tmp.data(),
-                         pressure.data(),
-                         pressure_tmp.data(),
-                         divergence.data(),
+                         cell_state_flux.data(),
                          h,
                          kin_visc,
                          dty_visc,

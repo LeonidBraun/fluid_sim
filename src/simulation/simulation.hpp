@@ -39,6 +39,11 @@ private:
   double time_ = 0.0;
   double last_dt_ = 0.0;
   CellCloud cloud_{};
+
+  struct LaunchConfig {
+    dim3 block;
+    dim3 grid;
+  } launch;
 };
 
 } // namespace fluid_sim
