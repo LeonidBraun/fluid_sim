@@ -44,6 +44,13 @@ private:
     dim3 block;
     dim3 grid;
   } launch;
+
+  GPUVector<CellState> base_state;
+  GPUVector<CellState> stage_state;
+  GPUVector<CellState> k1;
+  GPUVector<CellState> k2;
+  GPUVector<CellState> k3;
+  GPUVector<CellState> k4;
 };
 
 } // namespace fluid_sim

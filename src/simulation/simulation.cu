@@ -175,6 +175,13 @@ Simulation::Simulation(const io::RunConfig::SolverSettings& settings, const io::
 
   cloud_.resize(static_cast<uint32_t>(initial_state.grid.nx), static_cast<uint32_t>(initial_state.grid.ny));
 
+  base_state.resize(cloud_.size());
+  stage_state.resize(cloud_.size());
+  k1.resize(cloud_.size());
+  k2.resize(cloud_.size());
+  k3.resize(cloud_.size());
+  k4.resize(cloud_.size());
+
   cloud_.h = initial_state.grid.h;
   cloud_.kin_visc = initial_state.material.kinematic_viscosity;
   cloud_.dty_visc = initial_state.material.density_diffusivity;
@@ -226,13 +233,6 @@ void Simulation::step(double max_dt) {
   const uint32_t cell_count = cloud_.size();
   const dim3 linear_block(256, 1, 1);
   const dim3 linear_grid(std::max<uint32_t>(1U, (cell_count + linear_block.x - 1) / linear_block.x), 1, 1);
-
-  GPUVector<CellState> base_state(cell_count);
-  GPUVector<CellState> stage_state(cell_count);
-  GPUVector<CellState> k1(cell_count);
-  GPUVector<CellState> k2(cell_count);
-  GPUVector<CellState> k3(cell_count);
-  GPUVector<CellState> k4(cell_count);
 
   CUDA_CHECK(cudaMemcpy(
       base_state.data(), cloud_.cell_state.data(), cell_count * sizeof(CellState), cudaMemcpyDeviceToDevice));
