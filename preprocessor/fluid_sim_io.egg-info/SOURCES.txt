@@ -1,0 +1,12 @@
+pyproject.toml
+fluid_sim_io/__init__.py
+fluid_sim_io/_deps.py
+fluid_sim_io/hdf5_io.py
+fluid_sim_io/json_io.py
+fluid_sim_io/paths.py
+fluid_sim_io/types.py
+fluid_sim_io.egg-info/PKG-INFO
+fluid_sim_io.egg-info/SOURCES.txt
+fluid_sim_io.egg-info/dependency_links.txt
+fluid_sim_io.egg-info/requires.txt
+fluid_sim_io.egg-info/top_level.txt

@@ -56,12 +56,13 @@ FakeRiemann(const CellState& ls, const CellState& rs, const V3& normal, const fl
   const CellState flux_l{dot(ls.momentum, normal), ls.momentum * un_l + p_l * normal};
   const CellState flux_r{dot(rs.momentum, normal), rs.momentum * un_r + p_r * normal};
 
-  const float a = fmaxf(fabsf(un_l) + sos, fabsf(un_r) + sos);
+  const float a = fmaxf(fabsf(un_l), fabsf(un_r));
 
   CellState F;
   F.density_offset =
       0.5f * (flux_l.density_offset + flux_r.density_offset) - 0.5f * a * (rs.density_offset - ls.density_offset);
-  F.momentum = 0.5f * (flux_l.momentum + flux_r.momentum) - 0.5f * a * (rs.momentum - ls.momentum);
+  F.momentum = 0.5f * (flux_l.momentum + flux_r.momentum);
+  //  - 0.5f * a * (rs.momentum - ls.momentum);
   return F;
 }
 
@@ -92,7 +93,8 @@ __global__ void FinishRK4(const CellState* base,
 }
 
 __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
-  const float inv_h = 1.0f / fmaxf(cloud.h, 1.0e-6f);
+  const float inv_h = 1.0f / cloud.h;
+  const float inv_h2 = inv_h * inv_h;
   const V3 nx_pos(1.0f, 0.0f, 0.0f);
   const V3 nx_neg(-1.0f, 0.0f, 0.0f);
   const V3 ny_pos(0.0f, 1.0f, 0.0f);
@@ -102,12 +104,14 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
     for (uint32_t x = blockIdx.x * blockDim.x + threadIdx.x; x < cloud.size_x; x += blockDim.x * gridDim.x) {
       const uint32_t c = index_2d(x, y, cloud.size_x);
       const CellState state = cloud.cell_state[c];
+      const float rho_c = cloud.ref_dty + state.density_offset;
+      const V3 vel_c = state.momentum / rho_c;
       CellState tmp{0, V3(0)};
 
       {
         CellState rs = state;
         if (x == cloud.size_x - 1) {
-          rs.momentum = state.momentum - 2.0f * dot(state.momentum, nx_pos) * nx_pos;
+          rs.momentum = -state.momentum;
         } else {
           const uint32_t r = index_2d(x + 1, y, cloud.size_x);
           rs = cloud.cell_state[r];
@@ -120,7 +124,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (x == 0) {
-          rs.momentum = state.momentum - 2.0f * dot(state.momentum, nx_neg) * nx_neg;
+          rs.momentum = -state.momentum;
         } else {
           const uint32_t l = index_2d(x - 1, y, cloud.size_x);
           rs = cloud.cell_state[l];
@@ -133,7 +137,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (y == cloud.size_y - 1) {
-          rs.momentum = state.momentum - 2.0f * dot(state.momentum, ny_pos) * ny_pos;
+          rs.momentum = -state.momentum;
         } else {
           const uint32_t u = index_2d(x, y + 1, cloud.size_x);
           rs = cloud.cell_state[u];
@@ -146,7 +150,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (y == 0) {
-          rs.momentum = state.momentum - 2.0f * dot(state.momentum, ny_neg) * ny_neg;
+          rs.momentum = -state.momentum;
         } else {
           const uint32_t d = index_2d(x, y - 1, cloud.size_x);
           rs = cloud.cell_state[d];
@@ -156,10 +160,38 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
         tmp.momentum -= inv_h * flux.momentum;
       }
 
-      cloud.cell_state_tmp[c] = tmp;
+      if (cloud.kin_visc > 0.0f) {
+        V3 vel_xp = -vel_c;
+        V3 vel_xm = -vel_c;
+        V3 vel_yp = -vel_c;
+        V3 vel_ym = -vel_c;
 
-      if ((x * x + y * y) * cloud.h * cloud.h < 0.5)
-        cloud.cell_state_tmp[c].momentum[0] += cloud.sos * (cloud.cell_state[c].density_offset + cloud.ref_dty);
+        if (x + 1 < cloud.size_x) {
+          const CellState nbr = cloud.cell_state[index_2d(x + 1, y, cloud.size_x)];
+          vel_xp = nbr.momentum / rho_c;
+        }
+        if (x > 0) {
+          const CellState nbr = cloud.cell_state[index_2d(x - 1, y, cloud.size_x)];
+          vel_xm = nbr.momentum / rho_c;
+        }
+        if (y + 1 < cloud.size_y) {
+          const CellState nbr = cloud.cell_state[index_2d(x, y + 1, cloud.size_x)];
+          vel_yp = nbr.momentum / rho_c;
+        }
+        if (y > 0) {
+          const CellState nbr = cloud.cell_state[index_2d(x, y - 1, cloud.size_x)];
+          vel_ym = nbr.momentum / rho_c;
+        }
+
+        const V3 lap_vel = (vel_xp + vel_xm + vel_yp + vel_ym - 4.0f * vel_c) * inv_h2;
+        tmp.momentum += cloud.kin_visc * cloud.ref_dty * lap_vel;
+      }
+      const float X = x * cloud.h;
+      const float Y = y * cloud.h;
+      if (((X - 2) * (X - 2) + Y * Y) < 0.25)
+        tmp.momentum[0] += 0.5f * (1.0f - cloud.cell_state[c].momentum[0]);
+      // tmp.momentum[0] += (1.0 - tmp.momentum[0]);
+      cloud.cell_state_tmp[c] = tmp;
     }
   }
 }
@@ -223,7 +255,12 @@ double Simulation::compute_time_step() const {
   const float max_vel = thrust::transform_reduce(
       thrust::device, begin, end, MaxAbsVelocity{cloud_.ref_dty}, 0.0f, thrust::maximum<float>{});
   const float max_speed = max_vel + cloud_.sos;
-  return settings_.cfl * cloud_.h / max_speed;
+  const double advective_dt = settings_.cfl * cloud_.h / std::max<double>(max_speed, 1.0e-6);
+  if (cloud_.kin_visc <= 0.0f) {
+    return advective_dt;
+  }
+  const double diffusive_dt = 0.25 * cloud_.h * cloud_.h / cloud_.kin_visc;
+  return std::min(advective_dt, diffusive_dt);
 }
 
 void Simulation::step(double max_dt) {
@@ -249,29 +286,30 @@ void Simulation::step(double max_dt) {
                          cloud_.sos};
   };
 
+  // std::cout << cloud_.kin_visc << "\n";
   RHS<<<launch.grid, launch.block>>>(make_view(base_state.data(), k1.data()), current_time);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
 
   BuildStageState<<<linear_grid, linear_block>>>(
       base_state.data(), k1.data(), stage_state.data(), 0.5f * dt, cell_count);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
   RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k2.data()), current_time + 0.5f * dt);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
 
   BuildStageState<<<linear_grid, linear_block>>>(
       base_state.data(), k2.data(), stage_state.data(), 0.5f * dt, cell_count);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
   RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k3.data()), current_time + 0.5f * dt);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
 
   BuildStageState<<<linear_grid, linear_block>>>(base_state.data(), k3.data(), stage_state.data(), dt, cell_count);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
   RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k4.data()), current_time + dt);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
 
   FinishRK4<<<linear_grid, linear_block>>>(
       base_state.data(), k1.data(), k2.data(), k3.data(), k4.data(), cloud_.cell_state.data(), dt, cell_count);
-  CUDA_CHECK(cudaGetLastError());
+  // CUDA_CHECK(cudaGetLastError());
 
   last_dt_ = current_dt;
   time_ += current_dt;
