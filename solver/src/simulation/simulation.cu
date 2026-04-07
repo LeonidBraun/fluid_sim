@@ -46,23 +46,17 @@ __device__ float prs(const float dty_offset, const float sos) {
 
 __device__ CellState
 FakeRiemann(const CellState& ls, const CellState& rs, const V3& normal, const float ref_dty, const float sos) {
-  const float rho_l = fmaxf(ref_dty + ls.density_offset, 1.0e-6f);
-  const float rho_r = fmaxf(ref_dty + rs.density_offset, 1.0e-6f);
-  const float un_l = dot(ls.momentum, normal) / rho_l;
-  const float un_r = dot(rs.momentum, normal) / rho_r;
-  const float p_l = prs(ls.density_offset, sos);
-  const float p_r = prs(rs.density_offset, sos);
 
-  const CellState flux_l{dot(ls.momentum, normal), ls.momentum * un_l + p_l * normal};
-  const CellState flux_r{dot(rs.momentum, normal), rs.momentum * un_r + p_r * normal};
+  const float rho_l = ref_dty + ls.density_offset;
+  const float rho_r = ref_dty + rs.density_offset;
 
-  const float a = fmaxf(fabsf(un_l), fabsf(un_r));
+  const float rho = sqrt(rho_l * rho_r);
+  const V3 u = (rs.momentum + ls.momentum) / (rho_r + rho_l);
+  const float u_n = dot(u, normal);
 
   CellState F;
-  F.density_offset =
-      0.5f * (flux_l.density_offset + flux_r.density_offset) - 0.5f * a * (rs.density_offset - ls.density_offset);
-  F.momentum = 0.5f * (flux_l.momentum + flux_r.momentum);
-  //  - 0.5f * a * (rs.momentum - ls.momentum);
+  F.density_offset = rho * u_n - 0.0001f * sos * (rs.density_offset - ls.density_offset);
+  F.momentum = rho * u_n * u + normal * prs(rho - ref_dty, sos);
   return F;
 }
 
@@ -95,10 +89,10 @@ __global__ void FinishRK4(const CellState* base,
 __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
   const float inv_h = 1.0f / cloud.h;
   const float inv_h2 = inv_h * inv_h;
-  const V3 nx_pos(1.0f, 0.0f, 0.0f);
-  const V3 nx_neg(-1.0f, 0.0f, 0.0f);
-  const V3 ny_pos(0.0f, 1.0f, 0.0f);
-  const V3 ny_neg(0.0f, -1.0f, 0.0f);
+  constexpr V3 nx_pos(1.0f, 0.0f, 0.0f);
+  constexpr V3 nx_neg(-1.0f, 0.0f, 0.0f);
+  constexpr V3 ny_pos(0.0f, 1.0f, 0.0f);
+  constexpr V3 ny_neg(0.0f, -1.0f, 0.0f);
 
   for (uint32_t y = blockIdx.y * blockDim.y + threadIdx.y; y < cloud.size_y; y += blockDim.y * gridDim.y) {
     for (uint32_t x = blockIdx.x * blockDim.x + threadIdx.x; x < cloud.size_x; x += blockDim.x * gridDim.x) {
@@ -111,6 +105,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (x == cloud.size_x - 1) {
+          rs.density_offset = state.density_offset;
           rs.momentum = -state.momentum;
         } else {
           const uint32_t r = index_2d(x + 1, y, cloud.size_x);
@@ -124,6 +119,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (x == 0) {
+          rs.density_offset = state.density_offset;
           rs.momentum = -state.momentum;
         } else {
           const uint32_t l = index_2d(x - 1, y, cloud.size_x);
@@ -137,6 +133,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (y == cloud.size_y - 1) {
+          rs.density_offset = state.density_offset;
           rs.momentum = -state.momentum;
         } else {
           const uint32_t u = index_2d(x, y + 1, cloud.size_x);
@@ -150,6 +147,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
       {
         CellState rs = state;
         if (y == 0) {
+          rs.density_offset = rs.density_offset;
           rs.momentum = -state.momentum;
         } else {
           const uint32_t d = index_2d(x, y - 1, cloud.size_x);
