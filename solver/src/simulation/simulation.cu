@@ -55,7 +55,7 @@ FakeRiemann(const CellState& ls, const CellState& rs, const V3& normal, const fl
   const float u_n = dot(u, normal);
 
   CellState F;
-  F.density_offset = rho * u_n - 0.0001f * sos * (rs.density_offset - ls.density_offset);
+  F.density_offset = rho * u_n - 0.001f * sos * (rs.density_offset - ls.density_offset);
   F.momentum = rho * u_n * u + normal * prs(rho - ref_dty, sos);
   return F;
 }
