@@ -51,6 +51,13 @@ public:
     }
   }
 
+  template <typename U>
+  INLINE constexpr explicit Vector(const Vector<U, N>& other) {
+    for (std::size_t i = 0; i < N; ++i) {
+      values_[i] = static_cast<T>(other[i]);
+    }
+  }
+
   template <typename... Args,
             typename = std::enable_if_t<sizeof...(Args) == N && (std::is_convertible_v<Args, T> && ...)>>
   INLINE constexpr explicit Vector(Args... args)

@@ -55,7 +55,7 @@ FakeRiemann(const CellState& ls, const CellState& rs, const V3& normal, const fl
   const float u_n = dot(u, normal);
 
   CellState F;
-  F.density_offset = rho * u_n - 0.001f * sos * (rs.density_offset - ls.density_offset);
+  F.density_offset = rho * u_n - 0.01f * sos * (rs.density_offset - ls.density_offset);
   F.momentum = rho * u_n * u + normal * prs(rho - ref_dty, sos);
   return F;
 }
@@ -88,107 +88,44 @@ __global__ void FinishRK4(const CellState* base,
 
 __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
   const float inv_h = 1.0f / cloud.h;
-  const float inv_h2 = inv_h * inv_h;
-  constexpr V3 nx_pos(1.0f, 0.0f, 0.0f);
-  constexpr V3 nx_neg(-1.0f, 0.0f, 0.0f);
-  constexpr V3 ny_pos(0.0f, 1.0f, 0.0f);
-  constexpr V3 ny_neg(0.0f, -1.0f, 0.0f);
+
+  using V3i = Vector<int, 3>;
+  constexpr Vector<V3i, 4> dirs{V3i{1, 0, 0}, V3i{-1, 0, 0}, V3i{0, 1, 0}, V3i{0, -1, 0}};
 
   for (uint32_t y = blockIdx.y * blockDim.y + threadIdx.y; y < cloud.size_y; y += blockDim.y * gridDim.y) {
     for (uint32_t x = blockIdx.x * blockDim.x + threadIdx.x; x < cloud.size_x; x += blockDim.x * gridDim.x) {
       const uint32_t c = index_2d(x, y, cloud.size_x);
-      const CellState state = cloud.cell_state[c];
-      const float rho_c = cloud.ref_dty + state.density_offset;
-      const V3 vel_c = state.momentum / rho_c;
-      CellState tmp{0, V3(0)};
+      const CellState cs = cloud.cell_state[c];
+      const float rho_c = cloud.ref_dty + cs.density_offset;
+      const V3 vel_c = cs.momentum / rho_c;
+      CellState tmp{0.f, V3(0.f)};
 
-      {
-        CellState rs = state;
-        if (x == cloud.size_x - 1) {
-          rs.density_offset = state.density_offset;
-          rs.momentum = -state.momentum;
+      for (V3i dir : dirs) {
+        CellState ns;
+        const uint32_t nx = x + static_cast<uint32_t>(dir[0]);
+        const uint32_t ny = y + static_cast<uint32_t>(dir[1]);
+        if (nx < cloud.size_x && ny < cloud.size_y) {
+          const uint32_t n = index_2d(nx, ny, cloud.size_x);
+          ns = cloud.cell_state[n];
         } else {
-          const uint32_t r = index_2d(x + 1, y, cloud.size_x);
-          rs = cloud.cell_state[r];
+          ns.density_offset = cs.density_offset;
+          ns.momentum = -cs.momentum;
         }
-        const CellState flux = FakeRiemann(state, rs, nx_pos, cloud.ref_dty, cloud.sos);
-        tmp.density_offset -= inv_h * flux.density_offset;
-        tmp.momentum -= inv_h * flux.momentum;
+        const CellState flux = FakeRiemann(cs, ns, V3(dir), cloud.ref_dty, cloud.sos);
+        tmp.momentum +=
+            inv_h * cloud.kin_visc * cloud.ref_dty * (ns.momentum / (cloud.ref_dty + ns.density_offset) - vel_c);
+        tmp.density_offset -= flux.density_offset;
+        tmp.momentum -= flux.momentum;
       }
 
-      {
-        CellState rs = state;
-        if (x == 0) {
-          rs.density_offset = state.density_offset;
-          rs.momentum = -state.momentum;
-        } else {
-          const uint32_t l = index_2d(x - 1, y, cloud.size_x);
-          rs = cloud.cell_state[l];
-        }
-        const CellState flux = FakeRiemann(state, rs, nx_neg, cloud.ref_dty, cloud.sos);
-        tmp.density_offset -= inv_h * flux.density_offset;
-        tmp.momentum -= inv_h * flux.momentum;
-      }
-
-      {
-        CellState rs = state;
-        if (y == cloud.size_y - 1) {
-          rs.density_offset = state.density_offset;
-          rs.momentum = -state.momentum;
-        } else {
-          const uint32_t u = index_2d(x, y + 1, cloud.size_x);
-          rs = cloud.cell_state[u];
-        }
-        const CellState flux = FakeRiemann(state, rs, ny_pos, cloud.ref_dty, cloud.sos);
-        tmp.density_offset -= inv_h * flux.density_offset;
-        tmp.momentum -= inv_h * flux.momentum;
-      }
-
-      {
-        CellState rs = state;
-        if (y == 0) {
-          rs.density_offset = rs.density_offset;
-          rs.momentum = -state.momentum;
-        } else {
-          const uint32_t d = index_2d(x, y - 1, cloud.size_x);
-          rs = cloud.cell_state[d];
-        }
-        const CellState flux = FakeRiemann(state, rs, ny_neg, cloud.ref_dty, cloud.sos);
-        tmp.density_offset -= inv_h * flux.density_offset;
-        tmp.momentum -= inv_h * flux.momentum;
-      }
-
-      if (cloud.kin_visc > 0.0f) {
-        V3 vel_xp = -vel_c;
-        V3 vel_xm = -vel_c;
-        V3 vel_yp = -vel_c;
-        V3 vel_ym = -vel_c;
-
-        if (x + 1 < cloud.size_x) {
-          const CellState nbr = cloud.cell_state[index_2d(x + 1, y, cloud.size_x)];
-          vel_xp = nbr.momentum / rho_c;
-        }
-        if (x > 0) {
-          const CellState nbr = cloud.cell_state[index_2d(x - 1, y, cloud.size_x)];
-          vel_xm = nbr.momentum / rho_c;
-        }
-        if (y + 1 < cloud.size_y) {
-          const CellState nbr = cloud.cell_state[index_2d(x, y + 1, cloud.size_x)];
-          vel_yp = nbr.momentum / rho_c;
-        }
-        if (y > 0) {
-          const CellState nbr = cloud.cell_state[index_2d(x, y - 1, cloud.size_x)];
-          vel_ym = nbr.momentum / rho_c;
-        }
-
-        const V3 lap_vel = (vel_xp + vel_xm + vel_yp + vel_ym - 4.0f * vel_c) * inv_h2;
-        tmp.momentum += cloud.kin_visc * cloud.ref_dty * lap_vel;
-      }
-      const float X = x * cloud.h;
-      const float Y = y * cloud.h;
-      if (((X - 2) * (X - 2) + Y * Y) < 0.25)
-        tmp.momentum[0] += 0.5f * (1.0f - cloud.cell_state[c].momentum[0]);
+      // const float X = x * cloud.h;
+      // const float Y = y * cloud.h;
+      // if (((X - 2) * (X - 2) + Y * Y) < 0.25)
+      // tmp.momentum += 0.1f * cloud.sos / cloud.h * (V3{1.f, 0.f, 0.f} - vel_c);
       // tmp.momentum[0] += (1.0 - tmp.momentum[0]);
+
+      tmp.density_offset = inv_h * tmp.density_offset;
+      tmp.momentum = inv_h * tmp.momentum;
       cloud.cell_state_tmp[c] = tmp;
     }
   }
