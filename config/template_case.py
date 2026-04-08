@@ -5,7 +5,7 @@ import shutil
 import subprocess
 
 try:
-    from fluid_sim_io import Filed, Frame, RunConfig, State, load_output_states
+    from fluid_sim_io import Filed, Frame, OutputSettings, RunConfig, SolverSettings, State, StateGrid, StateMaterialProperties, load_output_states
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
         "fluid_sim_io is not installed. Activate the virtual environment and run "
@@ -23,11 +23,12 @@ def total_kinetic_energy(state: State) -> float:
     frame = frame_ref.data
     nx = state.grid.nx
     ny = state.grid.ny
+    nz = state.grid.nz
     h = state.grid.h
-    rho = state.material.reference_density + frame.density_offset_grid(nx, ny)
-    momentum = frame.momentum_grid(nx, ny)
-    momentum_squared = (momentum**2).sum(axis=-1)
-    return float(0.5 * ((momentum_squared / rho).sum()) * h * h)
+    rho = state.material.reference_density + frame.density_offset_grid(nx, ny, nz)
+    momentum = frame.momentum_grid(nx, ny, nz)
+    momentum_squared = (momentum ** 2).sum(axis=-1)
+    return float(0.5 * ((momentum_squared / rho).sum()) * h * h * h)
 
 
 def main() -> None:
@@ -44,19 +45,21 @@ def main() -> None:
         shutil.rmtree(case_dir)
     case_dir.mkdir(parents=True)
 
-    nx = 256
-    ny = 128
-    initial_frame = Frame.zeros(nx, ny)
+    nx = 16
+    ny = 8
+    nz = 4
+    initial_frame = Frame.zeros(nx, ny, nz)
 
     initial_state = State(
         time=0.0,
-        grid=State.Grid(
+        grid=StateGrid(
             nx=nx,
             ny=ny,
+            nz=nz,
             h=0.02,
             frame=Filed(file=frame_path.name, data=initial_frame),
         ),
-        material=State.MaterialProperties(
+        material=StateMaterialProperties(
             speed_of_sound=10.0,
             reference_density=1.225,
             kinematic_viscosity=1.5e-5,
@@ -65,8 +68,8 @@ def main() -> None:
     )
 
     run_config = RunConfig(
-        solver_settings=RunConfig.SolverSettings(cfl=0.05, pressure_iterations=60),
-        output_settings=RunConfig.OutputSettings(end_time=1.0, output_interval=0.1),
+        solver_settings=SolverSettings(cfl=0.05, pressure_iterations=60),
+        output_settings=OutputSettings(end_time=0.05, output_interval=0.05),
         init_state=Filed(file=state_path.name, data=initial_state),
     )
 
@@ -75,11 +78,11 @@ def main() -> None:
     subprocess.run([str(solver_path), str(config_path)], cwd=str(ROOT), check=True)
 
     outputs = load_output_states(config_path)
-    if len(outputs) < 3:
-        raise RuntimeError(f"Expected at least 3 output states, found {len(outputs)}.")
+    if len(outputs) < 2:
+        raise RuntimeError(f"Expected at least 2 output states, found {len(outputs)}.")
 
-    print("Last 3 output kinetic energies:")
-    for output in outputs[-3:]:
+    print("Last outputs kinetic energies:")
+    for output in outputs[-2:]:
         energy = total_kinetic_energy(output.data)
         print(f"{output.file}: t = {output.data.time:.6f} s, KE = {energy:.12e}")
 

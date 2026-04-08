@@ -1,4 +1,7 @@
 build/
-build/
+*/build/
 .venv
 *.Identifier
+__pycache__/
+**/__pycache__/
+*.py[cod]

@@ -5,12 +5,12 @@ from .paths import resolve_sibling_path
 from .types import Filed, Frame, OutputSettings, RunConfig, SolverSettings, State, StateGrid, StateMaterialProperties
 
 
-def read_frame(path, nx: int, ny: int) -> Frame:
-    return Frame.read_hdf5(path, nx, ny)
+def read_frame(path, nx: int, ny: int, nz: int = 1) -> Frame:
+    return Frame.read_hdf5(path, nx, ny, nz)
 
 
-def write_frame(path, frame: Frame, nx: int, ny: int):
-    return frame.write_hdf5(path, nx, ny)
+def write_frame(path, frame: Frame, nx: int, ny: int, nz: int = 1):
+    return frame.write_hdf5(path, nx, ny, nz)
 
 
 def read_state(path) -> State:

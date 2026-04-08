@@ -3,7 +3,7 @@
 ## Run
 
 ```bash
-./build/fluid_sim /mnt/c/Users/LeonidBraun/Downloads/test_sim/test_sim.json
+./solver/build/fluid_sim /mnt/c/Users/LeonidBraun/Downloads/test_sim/test_sim.json
 ```
 
 The solver reads a run config JSON, an initial state JSON, and HDF5 frame data. It also writes `outputs/series.xdmf` for ParaView, but the simulation state is described by JSON files plus the referenced HDF5 frames.
@@ -40,7 +40,7 @@ Example:
 The state JSON contains:
 
 - `time`
-- `grid`: `nx`, `ny`, `h`, optional `frame`
+- `grid`: `nx`, `ny`, `nz`, `h`, optional `frame`
 - `material`: `speed_of_sound`, `reference_density`, `kinematic_viscosity`, `density_diffusivity`
 
 Example:
@@ -49,8 +49,9 @@ Example:
 {
   "time": 0.0,
   "grid": {
-    "nx": 400,
-    "ny": 200,
+    "nx": 16,
+    "ny": 8,
+    "nz": 4,
     "h": 0.01,
     "frame": "init_frame.h5"
   },
@@ -80,8 +81,8 @@ The repo now includes the package under `preprocessor/fluid_sim_io/`, which mirr
 
 - `Filed[T]`
 - `Frame`
-- `State` with `State.Grid` and `State.MaterialProperties`
-- `RunConfig` with `RunConfig.SolverSettings` and `RunConfig.OutputSettings`
+- `State`, `StateGrid`, `StateMaterialProperties`
+- `RunConfig`, `SolverSettings`, `OutputSettings`
 
 Each dataclass can be read from disk and written back, and `RunConfig` can load the output states listed in its `outputs` array.
 
@@ -95,17 +96,18 @@ pip install -e ./preprocessor
 Example:
 
 ```python
-from fluid_sim_io import Filed, Frame, RunConfig, State
+from fluid_sim_io import Filed, Frame, OutputSettings, RunConfig, SolverSettings, State, StateGrid, StateMaterialProperties
 
 initial_state = State(
     time=0.0,
-    grid=State.Grid(
-        nx=64,
-        ny=32,
+    grid=StateGrid(
+        nx=16,
+        ny=8,
+        nz=4,
         h=0.02,
-        frame=Filed("default_frame.h5", Frame.zeros(64, 32)),
+        frame=Filed("default_frame.h5", Frame.zeros(16, 8, 4)),
     ),
-    material=State.MaterialProperties(
+    material=StateMaterialProperties(
         speed_of_sound=10.0,
         reference_density=1.225,
         kinematic_viscosity=1.5e-5,
@@ -114,18 +116,23 @@ initial_state = State(
 )
 
 config = RunConfig(
-    solver_settings=RunConfig.SolverSettings(cfl=0.05, pressure_iterations=60),
-    output_settings=RunConfig.OutputSettings(end_time=0.1, output_interval=0.05),
+    solver_settings=SolverSettings(cfl=0.05, pressure_iterations=60),
+    output_settings=OutputSettings(end_time=0.05, output_interval=0.05),
     init_state=Filed("default_state.json", initial_state),
 )
 
-config.write_case("build/default_sim/default.json")
+config.write_case("solver/build/default_3d/default.json")
 
-loaded = RunConfig.read_json("build/default_sim/default.json")
-outputs = loaded.load_output_states("build/default_sim/default.json")
+loaded = RunConfig.read_json("solver/build/default_3d/default.json")
+outputs = loaded.load_output_states("solver/build/default_3d/default.json")
 last_state = outputs[-1].data
 last_frame = last_state.grid.frame.data
-momentum = last_frame.momentum_grid(last_state.grid.nx, last_state.grid.ny)
+momentum = last_frame.momentum_grid(last_state.grid.nx, last_state.grid.ny, last_state.grid.nz)
 ```
+
+The HDF5 payload stores:
+
+- `density_offset` with shape `(nz, ny, nx)`
+- `momentum` with shape `(nz, ny, nx, 3)`
 
 Reading HDF5 frames requires `numpy` and `h5py` in the Python environment you use for postprocessing.

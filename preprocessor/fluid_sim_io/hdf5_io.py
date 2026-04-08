@@ -15,7 +15,7 @@ def read_frame_payload(path: str | Path) -> tuple[object, object]:
     return density_offset, momentum
 
 
-def write_frame_payload(path: str | Path, density_offset, momentum, nx: int, ny: int) -> Path:
+def write_frame_payload(path: str | Path, density_offset, momentum, nx: int, ny: int, nz: int) -> Path:
     require_numpy()
     require_h5py()
     destination = Path(path)
@@ -23,12 +23,12 @@ def write_frame_payload(path: str | Path, density_offset, momentum, nx: int, ny:
     with h5py.File(destination, "w") as handle:
         handle.create_dataset(
             "density_offset",
-            data=density_offset.reshape(1, int(ny), int(nx)),
+            data=density_offset.reshape(int(nz), int(ny), int(nx)),
             dtype="f4",
         )
         handle.create_dataset(
             "momentum",
-            data=momentum.reshape(1, int(ny), int(nx), 3),
+            data=momentum.reshape(int(nz), int(ny), int(nx), 3),
             dtype="f4",
         )
     return destination

@@ -34,39 +34,43 @@ class Frame:
         object.__setattr__(self, "momentum", to_float32_vector(self.momentum, name="momentum"))
 
     @classmethod
-    def zeros(cls, nx: int, ny: int) -> "Frame":
+    def zeros(cls, nx: int, ny: int, nz: int = 1) -> "Frame":
         require_numpy()
-        cell_count = int(nx) * int(ny)
+        cell_count = int(nx) * int(ny) * int(nz)
         return cls(
             density_offset=np.zeros(cell_count, dtype=np.float32),
             momentum=np.zeros(cell_count * 3, dtype=np.float32),
         )
 
     @classmethod
-    def read_hdf5(cls, path: str | Path, nx: int, ny: int) -> "Frame":
+    def read_hdf5(cls, path: str | Path, nx: int, ny: int, nz: int = 1) -> "Frame":
         density_offset, momentum = read_frame_payload(path)
         frame = cls(density_offset=density_offset, momentum=momentum)
-        frame.validate(nx, ny)
+        frame.validate(nx, ny, nz)
         return frame
 
-    def write_hdf5(self, path: str | Path, nx: int, ny: int) -> Path:
-        self.validate(nx, ny)
-        return write_frame_payload(path, self.density_offset, self.momentum, nx, ny)
+    def write_hdf5(self, path: str | Path, nx: int, ny: int, nz: int = 1) -> Path:
+        self.validate(nx, ny, nz)
+        return write_frame_payload(path, self.density_offset, self.momentum, nx, ny, nz)
 
-    def validate(self, nx: int, ny: int) -> None:
-        cell_count = int(nx) * int(ny)
+    def validate(self, nx: int, ny: int, nz: int = 1) -> None:
+        cell_count = int(nx) * int(ny) * int(nz)
         if self.density_offset.size != cell_count:
-            raise ValueError(f"density_offset size {self.density_offset.size} does not match nx*ny={cell_count}.")
+            raise ValueError(
+                f"density_offset size {self.density_offset.size} does not match nx*ny*nz={cell_count}."
+            )
         if self.momentum.size != cell_count * 3:
-            raise ValueError(f"momentum size {self.momentum.size} does not match 3*nx*ny={cell_count * 3}.")
+            raise ValueError(
+                f"momentum size {self.momentum.size} does not match 3*nx*ny*nz={cell_count * 3}."
+            )
 
-    def density_offset_grid(self, nx: int, ny: int) -> Any:
-        self.validate(nx, ny)
-        return self.density_offset.reshape(int(ny), int(nx))
+    def density_offset_grid(self, nx: int, ny: int, nz: int = 1) -> Any:
+        self.validate(nx, ny, nz)
+        return self.density_offset.reshape(int(nz), int(ny), int(nx))
 
-    def momentum_grid(self, nx: int, ny: int) -> Any:
-        self.validate(nx, ny)
-        return self.momentum.reshape(int(ny), int(nx), 3)
+    def momentum_grid(self, nx: int, ny: int, nz: int = 1) -> Any:
+        self.validate(nx, ny, nz)
+        return self.momentum.reshape(int(nz), int(ny), int(nx), 3)
 
 
 @dataclass(frozen=True)
@@ -74,20 +78,26 @@ class StateGrid:
     frame: Optional[Filed[Frame]] = None
     nx: int = 200
     ny: int = 100
+    nz: int = 1
     h: float = 1.0
 
     @classmethod
     def from_json_dict(cls, payload: dict[str, Any], state_path: str | Path) -> "StateGrid":
-        grid = cls(nx=int(payload["nx"]), ny=int(payload["ny"]), h=float(payload["h"]))
+        grid = cls(
+            nx=int(payload["nx"]),
+            ny=int(payload["ny"]),
+            nz=int(payload.get("nz", 1)),
+            h=float(payload["h"]),
+        )
         frame_name = payload.get("frame")
         if frame_name is None:
             return grid
         frame_path = resolve_sibling_path(state_path, frame_name)
-        frame = Frame.read_hdf5(frame_path, grid.nx, grid.ny)
+        frame = Frame.read_hdf5(frame_path, grid.nx, grid.ny, grid.nz)
         return replace(grid, frame=Filed(file=str(frame_name), data=frame))
 
     def to_json_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"nx": self.nx, "ny": self.ny, "h": self.h}
+        payload: dict[str, Any] = {"nx": self.nx, "ny": self.ny, "nz": self.nz, "h": self.h}
         if self.frame is not None and self.frame.file:
             payload["frame"] = self.frame.file
         return payload
@@ -219,7 +229,12 @@ class RunConfig:
         frame = self.init_state.data.grid.frame
         if frame is not None and frame.file:
             frame_path = resolve_sibling_path(state_path, frame.file)
-            frame.data.write_hdf5(frame_path, self.init_state.data.grid.nx, self.init_state.data.grid.ny)
+            frame.data.write_hdf5(
+                frame_path,
+                self.init_state.data.grid.nx,
+                self.init_state.data.grid.ny,
+                self.init_state.data.grid.nz,
+            )
         return config_path, state_path
 
     def load_output_state(self, config_path: str | Path, index: int) -> Filed[State]:
@@ -230,11 +245,6 @@ class RunConfig:
     def load_output_states(self, config_path: str | Path) -> tuple[Filed[State], ...]:
         return tuple(self.load_output_state(config_path, index) for index in range(len(self.outputs)))
 
-
-State.Grid = StateGrid
-State.MaterialProperties = StateMaterialProperties
-RunConfig.SolverSettings = SolverSettings
-RunConfig.OutputSettings = OutputSettings
 
 
 __all__ = [
