@@ -25,6 +25,7 @@ struct State {
     std::optional<Filed<Frame>> frame;
     int nx = 200;
     int ny = 100;
+    int nz = 1;
     double h = 1.0;
   } grid;
 

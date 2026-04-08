@@ -3,6 +3,7 @@
   "grid": {
     "nx": 64,
     "ny": 32,
+    "nz": 1,
     "h": 0.02,
     "frame": "default_frame.h5"
   },

@@ -44,7 +44,7 @@ public:
 private:
   static io::RunConfig LoadRunConfig(const std::filesystem::path& config_path);
   static io::State LoadStateFile(const std::filesystem::path& state_path);
-  static io::Frame LoadFrameFile(const std::filesystem::path& frame_path, int nx, int ny);
+  static io::Frame LoadFrameFile(const std::filesystem::path& frame_path, int nx, int ny, int nz);
   static void ValidateRunConfig(const io::RunConfig& run_config, const io::State& init_state);
   static void WriteRunConfig(const std::filesystem::path& config_path, const io::RunConfig& run_config);
   static void WriteStateFile(const std::filesystem::path& state_path, const io::State& state);

@@ -100,8 +100,8 @@ void CleanupTempFile(const std::filesystem::path& input_path, const std::filesys
   std::filesystem::remove(local_input_path, error);
 }
 
-void write_scalar_dataset(hid_t file, const char* name, int nx, int ny, const std::vector<float>& values) {
-  const std::array<hsize_t, 3> dims = {1, static_cast<hsize_t>(ny), static_cast<hsize_t>(nx)};
+void write_scalar_dataset(hid_t file, const char* name, int nx, int ny, int nz, const std::vector<float>& values) {
+  const std::array<hsize_t, 3> dims = {static_cast<hsize_t>(nz), static_cast<hsize_t>(ny), static_cast<hsize_t>(nx)};
   H5Handle dataspace(H5Screate_simple(static_cast<int>(dims.size()), dims.data(), nullptr), H5Sclose);
   if (dataspace.get() < 0) {
     throw std::runtime_error("Unable to create HDF5 dataspace.");
@@ -117,8 +117,9 @@ void write_scalar_dataset(hid_t file, const char* name, int nx, int ny, const st
              "Unable to write scalar dataset.");
 }
 
-void write_vector_dataset(hid_t file, const char* name, int nx, int ny, const std::vector<float>& values) {
-  const std::array<hsize_t, 4> dims = {1, static_cast<hsize_t>(ny), static_cast<hsize_t>(nx), 3};
+void write_vector_dataset(hid_t file, const char* name, int nx, int ny, int nz, const std::vector<float>& values) {
+  const std::array<hsize_t, 4> dims = {
+      static_cast<hsize_t>(nz), static_cast<hsize_t>(ny), static_cast<hsize_t>(nx), 3};
   H5Handle dataspace(H5Screate_simple(static_cast<int>(dims.size()), dims.data(), nullptr), H5Sclose);
   if (dataspace.get() < 0) {
     throw std::runtime_error("Unable to create HDF5 vector dataspace.");
@@ -148,8 +149,8 @@ void write_vector_dataset(hid_t file, const char* name, int nx, int ny, const st
 
 } // namespace
 
-void write_frame_hdf5(const std::filesystem::path& output_path, int nx, int ny, const Frame& frame) {
-  const std::size_t cell_count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
+void write_frame_hdf5(const std::filesystem::path& output_path, int nx, int ny, int nz, const Frame& frame) {
+  const std::size_t cell_count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) * static_cast<std::size_t>(nz);
   if (frame.density_offset.size() != cell_count || frame.momentum.size() != cell_count * 3U) {
     throw std::runtime_error("Frame payload size does not match the target grid.");
   }
@@ -159,11 +160,11 @@ void write_frame_hdf5(const std::filesystem::path& output_path, int nx, int ny, 
     throw std::runtime_error("Unable to create HDF5 output file.");
   }
 
-  write_scalar_dataset(file.get(), "density_offset", nx, ny, frame.density_offset);
-  write_vector_dataset(file.get(), "momentum", nx, ny, frame.momentum);
+  write_scalar_dataset(file.get(), "density_offset", nx, ny, nz, frame.density_offset);
+  write_vector_dataset(file.get(), "momentum", nx, ny, nz, frame.momentum);
 }
 
-Frame read_frame_hdf5(const std::filesystem::path& input_path, int nx, int ny) {
+Frame read_frame_hdf5(const std::filesystem::path& input_path, int nx, int ny, int nz) {
   const std::filesystem::path local_input_path = MakeTempCopyIfNeeded(input_path);
   MaybeStageInputFile(input_path, local_input_path);
 
@@ -173,7 +174,8 @@ Frame read_frame_hdf5(const std::filesystem::path& input_path, int nx, int ny) {
       throw std::runtime_error("Unable to open HDF5 input file: " + input_path.string());
     }
 
-    const std::size_t cell_count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
+    const std::size_t cell_count =
+        static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) * static_cast<std::size_t>(nz);
     Frame frame;
     frame.density_offset = read_dataset(file.get(), "density_offset", cell_count);
     frame.momentum = read_dataset(file.get(), "momentum", cell_count * 3U);

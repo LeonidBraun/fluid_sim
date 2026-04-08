@@ -25,21 +25,22 @@ void write_xdmf_series(const std::filesystem::path& output_path,
     const auto& frame = frames[i];
     stream << "      <Grid Name=\"frame_" << i << "\" GridType=\"Uniform\">\n";
     stream << "        <Time Value=\"" << frame.time << "\"/>\n";
-    stream << "        <Topology TopologyType=\"3DCoRectMesh\" Dimensions=\"2 " << (state.grid.ny + 1) << ' '
-           << (state.grid.nx + 1) << "\"/>\n";
+    stream << "        <Topology TopologyType=\"3DCoRectMesh\" Dimensions=\"" << (state.grid.nz + 1) << ' '
+           << (state.grid.ny + 1) << ' ' << (state.grid.nx + 1) << "\"/>\n";
     stream << "        <Geometry GeometryType=\"ORIGIN_DXDYDZ\">\n";
     stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">0 0 "
-              "0</DataItem>\n";
-    stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">1 "
+               "0</DataItem>\n";
+    stream << "          <DataItem Dimensions=\"3\" NumberType=\"Float\" Precision=\"8\" Format=\"XML\">" << state.grid.h
+           << ' '
            << state.grid.h << ' ' << state.grid.h << "</DataItem>\n";
     stream << "        </Geometry>\n";
     stream << "        <Attribute Name=\"density_offset\" AttributeType=\"Scalar\" Center=\"Cell\">\n";
-    stream << "          <DataItem Dimensions=\"1 " << state.grid.ny << ' ' << state.grid.nx
+    stream << "          <DataItem Dimensions=\"" << state.grid.nz << ' ' << state.grid.ny << ' ' << state.grid.nx
            << "\" NumberType=\"Float\" Precision=\"4\" Format=\"HDF\">" << frame.file_name
            << ":/density_offset</DataItem>\n";
     stream << "        </Attribute>\n";
     stream << "        <Attribute Name=\"momentum\" AttributeType=\"Vector\" Center=\"Cell\">\n";
-    stream << "          <DataItem Dimensions=\"1 " << state.grid.ny << ' ' << state.grid.nx
+    stream << "          <DataItem Dimensions=\"" << state.grid.nz << ' ' << state.grid.ny << ' ' << state.grid.nx
            << " 3\" NumberType=\"Float\" Precision=\"4\" Format=\"HDF\">" << frame.file_name
            << ":/momentum</DataItem>\n";
     stream << "        </Attribute>\n";

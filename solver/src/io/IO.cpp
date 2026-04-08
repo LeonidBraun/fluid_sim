@@ -173,7 +173,7 @@ void OptionalField(
 }
 
 [[nodiscard]] json ToJson(const io::State::Grid& grid) {
-  json result{{"nx", grid.nx}, {"ny", grid.ny}, {"h", grid.h}};
+  json result{{"nx", grid.nx}, {"ny", grid.ny}, {"nz", grid.nz}, {"h", grid.h}};
   if (grid.frame.has_value() && !grid.frame->file.empty()) {
     result["frame"] = grid.frame->file;
   }
@@ -236,7 +236,7 @@ void IO::save_output(const Simulation& simulation) {
   const std::filesystem::path frame_path = data_dir_ / frame_name;
   const std::filesystem::path state_path = data_dir_ / state_name;
 
-  write_frame_hdf5(frame_path, init_state_.grid.nx, init_state_.grid.ny, frame);
+  write_frame_hdf5(frame_path, init_state_.grid.nx, init_state_.grid.ny, init_state_.grid.nz, frame);
 
   io::State state = init_state_;
   state.time = simulation.time();
@@ -307,11 +307,12 @@ io::State IO::LoadStateFile(const std::filesystem::path& state_path) {
   const json& grid = RequireObject(document, "grid", "state");
   RequireField(grid, "nx", state.grid.nx, "grid");
   RequireField(grid, "ny", state.grid.ny, "grid");
+  RequireField(grid, "nz", state.grid.nz, "grid");
   RequireField(grid, "h", state.grid.h, "grid");
   OptionalField(grid, "frame", state.grid.frame, "grid", [&state_path, &state](const json& value) {
     const std::string file = value.get<std::string>();
-    return std::optional<io::Filed<io::Frame>>{
-        io::Filed<io::Frame>{file, LoadFrameFile(ResolveSiblingPath(state_path, file), state.grid.nx, state.grid.ny)}};
+    return std::optional<io::Filed<io::Frame>>{io::Filed<io::Frame>{
+        file, LoadFrameFile(ResolveSiblingPath(state_path, file), state.grid.nx, state.grid.ny, state.grid.nz)}};
   });
 
   const json& material = RequireObject(document, "material", "state");
@@ -323,8 +324,8 @@ io::State IO::LoadStateFile(const std::filesystem::path& state_path) {
   return state;
 }
 
-io::Frame IO::LoadFrameFile(const std::filesystem::path& frame_path, int nx, int ny) {
-  return io::read_frame_hdf5(frame_path, nx, ny);
+io::Frame IO::LoadFrameFile(const std::filesystem::path& frame_path, int nx, int ny, int nz) {
+  return io::read_frame_hdf5(frame_path, nx, ny, nz);
 }
 
 void IO::ValidateRunConfig(const io::RunConfig& run_config, const io::State& init_state) {
@@ -343,8 +344,8 @@ void IO::ValidateRunConfig(const io::RunConfig& run_config, const io::State& ini
   if (run_config.output_settings.end_time < init_state.time) {
     throw std::runtime_error("output_settings.end_time must be >= init_state.time.");
   }
-  if (init_state.grid.nx < 2 || init_state.grid.ny < 2) {
-    throw std::runtime_error("State grid must be at least 2x2.");
+  if (init_state.grid.nx < 2 || init_state.grid.ny < 2 || init_state.grid.nz < 1) {
+    throw std::runtime_error("State grid must be at least 2x2x1.");
   }
   if (init_state.grid.h <= 0.0) {
     throw std::runtime_error("grid.h must be positive.");
