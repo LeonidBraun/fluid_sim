@@ -159,20 +159,16 @@ Simulation::Simulation(const io::RunConfig::SolverSettings& settings, const io::
   cloud_.ref_dty = initial_state.material.reference_density;
   cloud_.sos = initial_state.material.speed_of_sound;
 
-  if (initial_state.grid.frame.has_value()) {
-    const io::Frame& frame = initial_state.grid.frame->data;
-    if (frame.density_offset.size() != cloud_.size() || frame.momentum.size() != cloud_.size() * 3U) {
-      throw std::runtime_error("Initial state size does not match simulation dimensions.");
-    }
-    std::vector<CellState> device_state(cloud_.size());
-    for (std::size_t i = 0; i < cloud_.size(); ++i) {
-      device_state[i].density_offset = frame.density_offset[i];
-      device_state[i].momentum = V3(frame.momentum[3 * i], frame.momentum[3 * i + 1], frame.momentum[3 * i + 2]);
-    }
-    cloud_.cell_state.assign(device_state);
-  } else {
-    cloud_.cell_state.fill(CellState{0.f, V3(0.f)});
+  const io::Frame& frame = initial_state.grid.frame.data;
+  if (frame.density_offset.size() != cloud_.size() || frame.momentum.size() != cloud_.size() * 3U) {
+    throw std::runtime_error("Initial state size does not match simulation dimensions.");
   }
+  std::vector<CellState> device_state(cloud_.size());
+  for (std::size_t i = 0; i < cloud_.size(); ++i) {
+    device_state[i].density_offset = frame.density_offset[i];
+    device_state[i].momentum = V3(frame.momentum[3 * i], frame.momentum[3 * i + 1], frame.momentum[3 * i + 2]);
+  }
+  cloud_.cell_state.assign(device_state);
 
   cloud_.cell_state_tmp.fill(CellState{});
 

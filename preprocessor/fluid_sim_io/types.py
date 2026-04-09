@@ -14,8 +14,8 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class Filed(Generic[T]):
-    file: str
     data: T
+    file: str = ""
 
     def with_file(self, file: str | Path) -> "Filed[T]":
         return replace(self, file=Path(file).as_posix())
@@ -30,8 +30,14 @@ class Frame:
     momentum: Any = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "density_offset", to_float32_vector(self.density_offset, name="density_offset"))
-        object.__setattr__(self, "momentum", to_float32_vector(self.momentum, name="momentum"))
+        object.__setattr__(
+            self,
+            "density_offset",
+            to_float32_vector(self.density_offset, name="density_offset"),
+        )
+        object.__setattr__(
+            self, "momentum", to_float32_vector(self.momentum, name="momentum")
+        )
 
     @classmethod
     def zeros(cls, nx: int, ny: int, nz: int = 1) -> "Frame":
@@ -40,6 +46,37 @@ class Frame:
         return cls(
             density_offset=np.zeros(cell_count, dtype=np.float32),
             momentum=np.zeros(cell_count * 3, dtype=np.float32),
+        )
+
+    @classmethod
+    def from_fields(cls, density_offset: Any, momentum: Any) -> "Frame":
+        require_numpy()
+        density = np.ascontiguousarray(np.asarray(density_offset, dtype=np.float32))
+        if density.ndim == 2:
+            density = density[:, :, np.newaxis]
+        if density.ndim != 3:
+            raise ValueError(
+                "density_offset field must have shape (nx, ny, nz) or (nx, ny)."
+            )
+
+        momentum_field = np.ascontiguousarray(np.asarray(momentum, dtype=np.float32))
+        if momentum_field.ndim == 3 and momentum_field.shape[-1] == 3:
+            momentum_field = momentum_field[:, :, np.newaxis, :]
+        if momentum_field.ndim != 4 or momentum_field.shape[-1] != 3:
+            raise ValueError(
+                "momentum field must have shape (nx, ny, nz, 3) or (nx, ny, 3)."
+            )
+        if momentum_field.shape[:3] != density.shape:
+            raise ValueError(
+                "density_offset and momentum fields must agree on (nx, ny, nz)."
+            )
+
+        # Solver storage order is (nz, ny, nx[, 3]); Python-facing field order is (nx, ny, nz[, 3]).
+        density_solver = np.transpose(density, (2, 1, 0))
+        momentum_solver = np.transpose(momentum_field, (2, 1, 0, 3))
+        return cls(
+            density_offset=density_solver.reshape(-1),
+            momentum=momentum_solver.reshape(-1),
         )
 
     @classmethod
@@ -72,6 +109,12 @@ class Frame:
         self.validate(nx, ny, nz)
         return self.momentum.reshape(int(nz), int(ny), int(nx), 3)
 
+    def density_offset_field(self, nx: int, ny: int, nz: int = 1) -> Any:
+        return np.transpose(self.density_offset_grid(nx, ny, nz), (2, 1, 0))
+
+    def momentum_field(self, nx: int, ny: int, nz: int = 1) -> Any:
+        return np.transpose(self.momentum_grid(nx, ny, nz), (2, 1, 0, 3))
+
 
 @dataclass(frozen=True)
 class StateGrid:
@@ -82,7 +125,9 @@ class StateGrid:
     h: float = 1.0
 
     @classmethod
-    def from_json_dict(cls, payload: dict[str, Any], state_path: str | Path) -> "StateGrid":
+    def from_json_dict(
+        cls, payload: dict[str, Any], state_path: str | Path
+    ) -> "StateGrid":
         grid = cls(
             nx=int(payload["nx"]),
             ny=int(payload["ny"]),
@@ -94,10 +139,15 @@ class StateGrid:
             return grid
         frame_path = resolve_sibling_path(state_path, frame_name)
         frame = Frame.read_hdf5(frame_path, grid.nx, grid.ny, grid.nz)
-        return replace(grid, frame=Filed(file=str(frame_name), data=frame))
+        return replace(grid, frame=Filed(data=frame, file=str(frame_name)))
 
     def to_json_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"nx": self.nx, "ny": self.ny, "nz": self.nz, "h": self.h}
+        payload: dict[str, Any] = {
+            "nx": self.nx,
+            "ny": self.ny,
+            "nz": self.nz,
+            "h": self.h,
+        }
         if self.frame is not None and self.frame.file:
             payload["frame"] = self.frame.file
         return payload
@@ -151,7 +201,11 @@ class State:
         return cls.from_json_dict(payload, source)
 
     def to_json_dict(self) -> dict[str, Any]:
-        return {"time": self.time, "grid": self.grid.to_json_dict(), "material": self.material.to_json_dict()}
+        return {
+            "time": self.time,
+            "grid": self.grid.to_json_dict(),
+            "material": self.material.to_json_dict(),
+        }
 
     def write_json(self, path: str | Path, *, indent: int = 2) -> Path:
         return write_json(path, self.to_json_dict(), indent=indent)
@@ -159,12 +213,15 @@ class State:
 
 @dataclass(frozen=True)
 class SolverSettings:
-    cfl: float = 0.05
-    pressure_iterations: int = 60
+    cfl: float = 1.5
+    pressure_iterations: int = 6
 
     @classmethod
     def from_json_dict(cls, payload: dict[str, Any]) -> "SolverSettings":
-        return cls(cfl=float(payload["cfl"]), pressure_iterations=int(payload["pressure_iterations"]))
+        return cls(
+            cfl=float(payload["cfl"]),
+            pressure_iterations=int(payload["pressure_iterations"]),
+        )
 
     def to_json_dict(self) -> dict[str, Any]:
         return {"cfl": self.cfl, "pressure_iterations": self.pressure_iterations}
@@ -177,7 +234,10 @@ class OutputSettings:
 
     @classmethod
     def from_json_dict(cls, payload: dict[str, Any]) -> "OutputSettings":
-        return cls(end_time=float(payload["end_time"]), output_interval=float(payload["output_interval"]))
+        return cls(
+            end_time=float(payload["end_time"]),
+            output_interval=float(payload["output_interval"]),
+        )
 
     def to_json_dict(self) -> dict[str, Any]:
         return {"end_time": self.end_time, "output_interval": self.output_interval}
@@ -187,18 +247,24 @@ class OutputSettings:
 class RunConfig:
     solver_settings: SolverSettings = field(default_factory=SolverSettings)
     output_settings: OutputSettings = field(default_factory=OutputSettings)
-    init_state: Filed[State] = field(default_factory=lambda: Filed("default_state.json", State()))
+    init_state: Filed[State] = field(
+        default_factory=lambda: Filed(data=State(), file="default_state.json")
+    )
     outputs: tuple[str, ...] = ()
 
     @classmethod
-    def from_json_dict(cls, payload: dict[str, Any], config_path: str | Path) -> "RunConfig":
+    def from_json_dict(
+        cls, payload: dict[str, Any], config_path: str | Path
+    ) -> "RunConfig":
         source = Path(config_path)
         init_state_file = str(payload["init_state"])
         init_state_path = resolve_sibling_path(source, init_state_file)
         return cls(
             solver_settings=SolverSettings.from_json_dict(payload["solver_settings"]),
             output_settings=OutputSettings.from_json_dict(payload["output_settings"]),
-            init_state=Filed(file=init_state_file, data=State.read_json(init_state_path)),
+            init_state=Filed(
+                data=State.read_json(init_state_path), file=init_state_file
+            ),
             outputs=tuple(str(output) for output in payload.get("outputs", [])),
         )
 
@@ -209,6 +275,25 @@ class RunConfig:
         if not isinstance(payload, dict):
             raise TypeError("Run config file must contain a JSON object.")
         return cls.from_json_dict(payload, source)
+
+    def with_default_files(self, path: str | Path) -> "RunConfig":
+        config_path = Path(path)
+        init_state_file = self.init_state.file or f"init_state.json"
+        init_state = self.init_state.with_file(init_state_file)
+
+        frame = init_state.data.grid.frame
+        if frame is not None and not frame.file:
+            default_frame_file = f"init_frame.h5"
+            init_state = init_state.with_data(
+                replace(
+                    init_state.data,
+                    grid=replace(
+                        init_state.data.grid, frame=frame.with_file(default_frame_file)
+                    ),
+                )
+            )
+
+        return replace(self, init_state=init_state)
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -222,29 +307,32 @@ class RunConfig:
         return write_json(path, self.to_json_dict(), indent=indent)
 
     def write_case(self, path: str | Path, *, indent: int = 2) -> tuple[Path, Path]:
+        materialized = self.with_default_files(path)
         config_path = Path(path)
-        state_path = resolve_sibling_path(config_path, self.init_state.file)
-        self.write_json(config_path, indent=indent)
-        self.init_state.data.write_json(state_path, indent=indent)
-        frame = self.init_state.data.grid.frame
+        state_path = resolve_sibling_path(config_path, materialized.init_state.file)
+        materialized.write_json(config_path, indent=indent)
+        materialized.init_state.data.write_json(state_path, indent=indent)
+        frame = materialized.init_state.data.grid.frame
         if frame is not None and frame.file:
             frame_path = resolve_sibling_path(state_path, frame.file)
             frame.data.write_hdf5(
                 frame_path,
-                self.init_state.data.grid.nx,
-                self.init_state.data.grid.ny,
-                self.init_state.data.grid.nz,
+                materialized.init_state.data.grid.nx,
+                materialized.init_state.data.grid.ny,
+                materialized.init_state.data.grid.nz,
             )
         return config_path, state_path
 
     def load_output_state(self, config_path: str | Path, index: int) -> Filed[State]:
         state_file = self.outputs[index]
         state_path = resolve_sibling_path(config_path, state_file)
-        return Filed(file=state_file, data=State.read_json(state_path))
+        return Filed(data=State.read_json(state_path), file=state_file)
 
     def load_output_states(self, config_path: str | Path) -> tuple[Filed[State], ...]:
-        return tuple(self.load_output_state(config_path, index) for index in range(len(self.outputs)))
-
+        return tuple(
+            self.load_output_state(config_path, index)
+            for index in range(len(self.outputs))
+        )
 
 
 __all__ = [

@@ -1,5 +1,6 @@
 build/
 */build/
+**/.vscode
 .venv
 *.Identifier
 __pycache__/

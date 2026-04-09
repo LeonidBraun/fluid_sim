@@ -1,8 +1,9 @@
 #pragma once
 
 #include <filesystem>
-#include <optional>
 #include <string>
+#include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace io {
@@ -13,6 +14,9 @@ struct Filed {
   T data;
 };
 
+template <typename T>
+using Ref = std::variant<std::monostate, T, std::string>;
+
 struct Frame {
   std::vector<float> density_offset;
   std::vector<float> momentum;
@@ -22,7 +26,9 @@ struct State {
   double time = 0.0;
 
   struct Grid {
-    std::optional<Filed<Frame>> frame;
+    Filed<Frame> frame;
+    std::unordered_map<std::string, std::vector<float>> cell_fields;
+    std::unordered_map<std::string, std::vector<float>> point_fields;
     int nx = 200;
     int ny = 100;
     int nz = 1;
@@ -30,22 +36,22 @@ struct State {
   } grid;
 
   struct MaterialProperties {
-    double speed_of_sound = 10.0;
-    double reference_density = 1.225;
-    double kinematic_viscosity = 1.5e-5;
-    double density_diffusivity = 1.0e-5;
+    double speed_of_sound;
+    double reference_density;
+    double kinematic_viscosity;
+    double density_diffusivity;
   } material;
 };
 
 struct RunConfig {
   struct SolverSettings {
-    double cfl = 0.05;
-    int pressure_iterations = 60;
+    double cfl;
+    int pressure_iterations;
   } solver_settings;
 
   struct OutputSettings {
-    double end_time = 10.0;
-    double output_interval = 1.0;
+    double end_time;
+    double output_interval;
   } output_settings;
 
   Filed<State> init_state;

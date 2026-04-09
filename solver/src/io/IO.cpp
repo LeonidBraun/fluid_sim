@@ -174,8 +174,8 @@ void OptionalField(
 
 [[nodiscard]] json ToJson(const io::State::Grid& grid) {
   json result{{"nx", grid.nx}, {"ny", grid.ny}, {"nz", grid.nz}, {"h", grid.h}};
-  if (grid.frame.has_value() && !grid.frame->file.empty()) {
-    result["frame"] = grid.frame->file;
+  if (!grid.frame.file.empty()) {
+    result["frame"] = grid.frame.file;
   }
   return result;
 }
@@ -309,9 +309,9 @@ io::State IO::LoadStateFile(const std::filesystem::path& state_path) {
   RequireField(grid, "ny", state.grid.ny, "grid");
   RequireField(grid, "nz", state.grid.nz, "grid");
   RequireField(grid, "h", state.grid.h, "grid");
-  OptionalField(grid, "frame", state.grid.frame, "grid", [&state_path, &state](const json& value) {
+  RequireField(grid, "frame", state.grid.frame, "grid", [&state_path, &state](const json& value) {
     const std::string file = value.get<std::string>();
-    return std::optional<io::Filed<io::Frame>>{io::Filed<io::Frame>{
+    return io::Filed<io::Frame>{io::Filed<io::Frame>{
         file, LoadFrameFile(ResolveSiblingPath(state_path, file), state.grid.nx, state.grid.ny, state.grid.nz)}};
   });
 
