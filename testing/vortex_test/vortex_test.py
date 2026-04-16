@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import subprocess
 
+# import matplotlib.pyplot as plt
+
 import fluid_sim_io as fs
 
 FILE = Path(__file__).resolve().parents[1]
@@ -95,21 +97,33 @@ class VortexTest:
         )
 
     def evaluate(self):
-        config_path = WORKDIR / "VortexTest" / "run_config.json"
-        outputs = fs.load_output_states(config_path)
-        if len(outputs) < 2:
-            raise RuntimeError(
-                f"Expected at least 2 output states, found {len(outputs)}."
-            )
+        sim_dir = WORKDIR / "VortexTest"
+        config_path = sim_dir / "run_config.json"
+        config = fs.read_run_config(config_path)
+        time = []
+        energy = []
+        for output in config.outputs:
+            # print(output)
+            state = fs.read_state(sim_dir / output)
+            # print(state.grid)
+            time += [state.time]
+            e = total_kinetic_energy(state)
+            print(e)
+            energy += [e]
 
-        print("Last outputs kinetic energies:")
-        for output in outputs[-2:]:
-            energy = total_kinetic_energy(output.data)
-            print(f"{output.file}: t = {output.data.time:.6f} s, KE = {energy:.12e}")
+        print(time)
+        print(energy)
+        # plt.plot(time, energy)
+        # plt.savefig(sim_dir / "energy.png")
+
+        # print("Last outputs kinetic energies:")
+        # for output in outputs[-2:]:
+        #     energy = total_kinetic_energy(output.data)
+        #     print(f"{output.file}: t = {output.data.time:.6f} s, KE = {energy:.12e}")
 
 
 if __name__ == "__main__":
     case = VortexTest()
-    case.create()
-    case.run()
-    # case.evaluate()
+    # case.create()
+    # case.run()
+    case.evaluate()

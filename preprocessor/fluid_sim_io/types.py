@@ -328,12 +328,6 @@ class RunConfig:
         state_path = resolve_sibling_path(config_path, state_file)
         return Filed(data=State.read_json(state_path), file=state_file)
 
-    def load_output_states(self, config_path: str | Path) -> tuple[Filed[State], ...]:
-        return tuple(
-            self.load_output_state(config_path, index)
-            for index in range(len(self.outputs))
-        )
-
 
 __all__ = [
     "Filed",
