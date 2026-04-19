@@ -32,6 +32,7 @@ struct CellCloud {
   uint32_t size_x = 0;
   uint32_t size_y = 0;
   uint32_t size_z = 0;
+
   GPUVector<CellState> cell_state;
   GPUVector<CellState> cell_state_tmp;
 

@@ -19,6 +19,8 @@ if(CMAKE_CUDA_COMPILER)
   add_executable(fluid_sim
     src/main.cpp
     src/io/IO.cpp
+    src/io/grid.cpp
+    src/io/hdf5_common.cpp
     src/io/hdf5_writer.cpp
     src/io/xdmf_writer.cpp
     src/simulation/simulation.cu

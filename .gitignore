@@ -6,3 +6,6 @@ build/
 __pycache__/
 **/__pycache__/
 *.py[cod]
+testing/workdir/
+.codex
+*.egg-info

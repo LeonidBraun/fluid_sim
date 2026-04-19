@@ -5,7 +5,7 @@
     "ny": 32,
     "nz": 1,
     "h": 0.02,
-    "frame": "default_frame.h5"
+    "frame": "init_frame.h5"
   },
   "material": {
     "speed_of_sound": 10.0,

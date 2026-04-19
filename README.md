@@ -84,7 +84,7 @@ The repo now includes the package under `preprocessor/fluid_sim_io/`, which mirr
 - `State`, `StateGrid`, `StateMaterialProperties`
 - `RunConfig`, `SolverSettings`, `OutputSettings`
 
-Each dataclass can be read from disk and written back, and `RunConfig` can load the output states listed in its `outputs` array.
+Each dataclass can be read from disk and written back, and `RunConfig` exposes the generated output state paths through its `outputs` array.
 
 For local development, install it in editable mode:
 
@@ -96,18 +96,32 @@ pip install -e ./preprocessor
 Example:
 
 ```python
-from fluid_sim_io import Filed, Frame, OutputSettings, RunConfig, SolverSettings, State, StateGrid, StateMaterialProperties
+from pathlib import Path
+import subprocess
 
-initial_state = State(
+import fluid_sim_io as fs
+import numpy as np
+
+config_path = Path(".../work_dir/simulation.json")
+solver_path = Path(".../fluid_sim/solver/build/fluid_sim")
+sim_dir = config_path.parent
+nx, ny, nz = 64, 32, 1
+
+initial_state = fs.State(
     time=0.0,
-    grid=StateGrid(
-        nx=16,
-        ny=8,
-        nz=4,
+    grid=fs.StateGrid(
+        nx=nx,
+        ny=ny,
+        nz=nz,
         h=0.02,
-        frame=Filed("default_frame.h5", Frame.zeros(16, 8, 4)),
+        frame=fs.Filed(
+            data=fs.Frame.from_fields(
+                density_offset=np.zeros((nx, ny, nz), dtype=np.float32),
+                momentum=np.zeros((nx, ny, nz, 3), dtype=np.float32),
+            )
+        ),
     ),
-    material=StateMaterialProperties(
+    material=fs.StateMaterialProperties(
         speed_of_sound=10.0,
         reference_density=1.225,
         kinematic_viscosity=1.5e-5,
@@ -115,19 +129,26 @@ initial_state = State(
     ),
 )
 
-config = RunConfig(
-    solver_settings=SolverSettings(cfl=0.05, pressure_iterations=60),
-    output_settings=OutputSettings(end_time=0.05, output_interval=0.05),
-    init_state=Filed("default_state.json", initial_state),
+run_config = fs.RunConfig(
+    solver_settings=fs.SolverSettings(cfl=0.05, pressure_iterations=60),
+    output_settings=fs.OutputSettings(end_time=0.1, output_interval=0.05),
+    init_state=fs.Filed(data=initial_state),
 )
 
-config.write_case("solver/build/default_3d/default.json")
+run_config.write_case(config_path)
 
-loaded = RunConfig.read_json("solver/build/default_3d/default.json")
-outputs = loaded.load_output_states("solver/build/default_3d/default.json")
-last_state = outputs[-1].data
+subprocess.run([str(solver_path), str(config_path)], check=True)
+
+config = fs.read_run_config(config_path)
+last_state = fs.read_state(sim_dir / config.outputs[-1])
 last_frame = last_state.grid.frame.data
-momentum = last_frame.momentum_grid(last_state.grid.nx, last_state.grid.ny, last_state.grid.nz)
+momentum = last_frame.momentum_grid(
+    last_state.grid.nx,
+    last_state.grid.ny,
+    last_state.grid.nz,
+)
+print(last_state.time)
+print(momentum.shape)
 ```
 
 The HDF5 payload stores:

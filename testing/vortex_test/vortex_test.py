@@ -4,13 +4,13 @@ from pathlib import Path
 import numpy as np
 import subprocess
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 import fluid_sim_io as fs
 
 FILE = Path(__file__).resolve().parents[1]
 WORKDIR = Path("/mnt/c/Users/LeonidBraun/Downloads").resolve()
-SOLVER = Path("/home/braun/repos/codex_test/solver/build/fluid_sim").resolve()
+SOLVER = Path("/home/braun/repos/fluid_sim/solver/build/fluid_sim").resolve()
 
 
 def total_kinetic_energy(state: fs.State) -> float:
@@ -103,27 +103,18 @@ class VortexTest:
         time = []
         energy = []
         for output in config.outputs:
-            # print(output)
             state = fs.read_state(sim_dir / output)
-            # print(state.grid)
             time += [state.time]
             e = total_kinetic_energy(state)
-            print(e)
+            print(output, e)
             energy += [e]
 
-        print(time)
-        print(energy)
-        # plt.plot(time, energy)
-        # plt.savefig(sim_dir / "energy.png")
-
-        # print("Last outputs kinetic energies:")
-        # for output in outputs[-2:]:
-        #     energy = total_kinetic_energy(output.data)
-        #     print(f"{output.file}: t = {output.data.time:.6f} s, KE = {energy:.12e}")
+        plt.plot(time, energy)
+        plt.savefig(sim_dir / "energy.png")
 
 
 if __name__ == "__main__":
     case = VortexTest()
-    # case.create()
-    # case.run()
+    case.create()
+    case.run()
     case.evaluate()

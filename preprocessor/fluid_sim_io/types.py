@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar
+import numpy as np
 
-from ._deps import np, require_numpy, to_float32_vector
 from .hdf5_io import read_frame_payload, write_frame_payload
+from .grid import Grid
 from .json_io import read_relaxed_json, write_json
 from .paths import resolve_sibling_path
 
@@ -17,12 +18,6 @@ class Filed(Generic[T]):
     data: T
     file: str = ""
 
-    def with_file(self, file: str | Path) -> "Filed[T]":
-        return replace(self, file=Path(file).as_posix())
-
-    def with_data(self, data: T) -> "Filed[T]":
-        return replace(self, data=data)
-
 
 @dataclass(frozen=True)
 class Frame:
@@ -33,24 +28,16 @@ class Frame:
         object.__setattr__(
             self,
             "density_offset",
-            to_float32_vector(self.density_offset, name="density_offset"),
+            np.asarray(self.density_offset, dtype=np.float32).reshape(-1),
         )
         object.__setattr__(
-            self, "momentum", to_float32_vector(self.momentum, name="momentum")
-        )
-
-    @classmethod
-    def zeros(cls, nx: int, ny: int, nz: int = 1) -> "Frame":
-        require_numpy()
-        cell_count = int(nx) * int(ny) * int(nz)
-        return cls(
-            density_offset=np.zeros(cell_count, dtype=np.float32),
-            momentum=np.zeros(cell_count * 3, dtype=np.float32),
+            self,
+            "momentum",
+            np.asarray(self.momentum, dtype=np.float32).reshape(-1),
         )
 
     @classmethod
     def from_fields(cls, density_offset: Any, momentum: Any) -> "Frame":
-        require_numpy()
         density = np.ascontiguousarray(np.asarray(density_offset, dtype=np.float32))
         if density.ndim == 2:
             density = density[:, :, np.newaxis]
@@ -108,13 +95,6 @@ class Frame:
     def momentum_grid(self, nx: int, ny: int, nz: int = 1) -> Any:
         self.validate(nx, ny, nz)
         return self.momentum.reshape(int(nz), int(ny), int(nx), 3)
-
-    def density_offset_field(self, nx: int, ny: int, nz: int = 1) -> Any:
-        return np.transpose(self.density_offset_grid(nx, ny, nz), (2, 1, 0))
-
-    def momentum_field(self, nx: int, ny: int, nz: int = 1) -> Any:
-        return np.transpose(self.momentum_grid(nx, ny, nz), (2, 1, 0, 3))
-
 
 @dataclass(frozen=True)
 class StateGrid:
@@ -248,7 +228,7 @@ class RunConfig:
     solver_settings: SolverSettings = field(default_factory=SolverSettings)
     output_settings: OutputSettings = field(default_factory=OutputSettings)
     init_state: Filed[State] = field(
-        default_factory=lambda: Filed(data=State(), file="default_state.json")
+        default_factory=lambda: Filed(data=State(), file="init_state.json")
     )
     outputs: tuple[str, ...] = ()
 
@@ -276,25 +256,6 @@ class RunConfig:
             raise TypeError("Run config file must contain a JSON object.")
         return cls.from_json_dict(payload, source)
 
-    def with_default_files(self, path: str | Path) -> "RunConfig":
-        config_path = Path(path)
-        init_state_file = self.init_state.file or f"init_state.json"
-        init_state = self.init_state.with_file(init_state_file)
-
-        frame = init_state.data.grid.frame
-        if frame is not None and not frame.file:
-            default_frame_file = f"init_frame.h5"
-            init_state = init_state.with_data(
-                replace(
-                    init_state.data,
-                    grid=replace(
-                        init_state.data.grid, frame=frame.with_file(default_frame_file)
-                    ),
-                )
-            )
-
-        return replace(self, init_state=init_state)
-
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "solver_settings": self.solver_settings.to_json_dict(),
@@ -303,14 +264,23 @@ class RunConfig:
             "outputs": list(self.outputs),
         }
 
-    def write_json(self, path: str | Path, *, indent: int = 2) -> Path:
-        return write_json(path, self.to_json_dict(), indent=indent)
-
     def write_case(self, path: str | Path, *, indent: int = 2) -> tuple[Path, Path]:
-        materialized = self.with_default_files(path)
         config_path = Path(path)
-        state_path = resolve_sibling_path(config_path, materialized.init_state.file)
-        materialized.write_json(config_path, indent=indent)
+        init_state_file = self.init_state.file or "init_state.json"
+        state_path = resolve_sibling_path(config_path, init_state_file)
+        frame = self.init_state.data.grid.frame
+        if frame is not None and not frame.file:
+            frame = replace(frame, file="init_frame.h5")
+        init_state = replace(
+            self.init_state.data,
+            grid=replace(self.init_state.data.grid, frame=frame),
+        )
+        materialized = replace(
+            self,
+            init_state=Filed(data=init_state, file=init_state_file),
+        )
+
+        write_json(config_path, materialized.to_json_dict(), indent=indent)
         materialized.init_state.data.write_json(state_path, indent=indent)
         frame = materialized.init_state.data.grid.frame
         if frame is not None and frame.file:
@@ -322,11 +292,6 @@ class RunConfig:
                 materialized.init_state.data.grid.nz,
             )
         return config_path, state_path
-
-    def load_output_state(self, config_path: str | Path, index: int) -> Filed[State]:
-        state_file = self.outputs[index]
-        state_path = resolve_sibling_path(config_path, state_file)
-        return Filed(data=State.read_json(state_path), file=state_file)
 
 
 __all__ = [
