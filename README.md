@@ -157,3 +157,12 @@ The frame HDF5 payload now stores:
 - `momentum` with shape `(nx, ny, nz, 3)`
 
 Reading HDF5 frames requires `numpy` and `h5py` in the Python environment you use for postprocessing.
+
+## TODOs
+
+- Finish projection vector stuff
+- Use proper Grid (finish vortex run test)
+- try singlephase (dambreak)
+- change architecture to **Simulation Config** - **Physical Setup** - **State** - **Post**
+- masked complex static boundaries
+- surfacetension with Cahn-Hilliard Free energy
