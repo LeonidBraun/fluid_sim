@@ -77,6 +77,7 @@ class VortexTest:
             material=fs.StateMaterialProperties(
                 speed_of_sound=4.0,
                 reference_density=1.225,
+                # kinematic_viscosity=5e-5,
                 kinematic_viscosity=5e-5,
                 density_diffusivity=1.0e-5,
             ),

@@ -5,12 +5,21 @@ import h5py
 import numpy as np
 
 
-def read_frame_payload(path: str | Path) -> tuple[object, object]:
+def read_frame_payload(path: str | Path, nx: int, ny: int, nz: int) -> tuple[object, object]:
     source = Path(path)
     with h5py.File(source, "r") as handle:
-        density_offset = np.asarray(handle["density_offset"], dtype=np.float32).reshape(-1)
-        momentum = np.asarray(handle["momentum"], dtype=np.float32).reshape(-1)
-    return density_offset, momentum
+        density_dataset = np.asarray(handle["density_offset"], dtype=np.float32)
+        momentum_dataset = np.asarray(handle["momentum"], dtype=np.float32)
+
+    if density_dataset.shape != (int(nx), int(ny), int(nz)):
+        raise ValueError(
+            "density_offset dataset shape does not match (nx, ny, nz)."
+        )
+    if momentum_dataset.shape != (int(nx), int(ny), int(nz), 3):
+        raise ValueError(
+            "momentum dataset shape does not match (nx, ny, nz, 3)."
+        )
+    return density_dataset.reshape(-1), momentum_dataset.reshape(-1)
 
 
 def write_frame_payload(path: str | Path, density_offset, momentum, nx: int, ny: int, nz: int) -> Path:
@@ -19,12 +28,12 @@ def write_frame_payload(path: str | Path, density_offset, momentum, nx: int, ny:
     with h5py.File(destination, "w") as handle:
         handle.create_dataset(
             "density_offset",
-            data=density_offset.reshape(int(nz), int(ny), int(nx)),
+            data=density_offset.reshape(int(nx), int(ny), int(nz)),
             dtype="f4",
         )
         handle.create_dataset(
             "momentum",
-            data=momentum.reshape(int(nz), int(ny), int(nx), 3),
+            data=momentum.reshape(int(nx), int(ny), int(nz), 3),
             dtype="f4",
         )
     return destination

@@ -34,29 +34,35 @@ struct MaxAbsVelocity {
 };
 
 template <typename T>
-__device__ T index_3d(T x, T y, T z, T nx, T ny) {
-  return (z * ny + y) * nx + x;
+__device__ T index_3d(T x, T y, T z, T ny, T nz) {
+  return (x * ny + y) * nz + z;
 }
-template __device__ int index_3d<int>(int x, int y, int z, int nx, int ny);
-template __device__ uint32_t index_3d<uint32_t>(uint32_t x, uint32_t y, uint32_t z, uint32_t nx, uint32_t ny);
+template __device__ int index_3d<int>(int x, int y, int z, int ny, int nz);
+template __device__ uint32_t index_3d<uint32_t>(uint32_t x, uint32_t y, uint32_t z, uint32_t ny, uint32_t nz);
 
 __device__ float prs(const float dty_offset, const float sos) {
   return sos * sos * dty_offset;
 }
 
-__device__ CellState
-FakeRiemann(const CellState& ls, const CellState& rs, const V3& normal, const float ref_dty, const float sos) {
+__device__ CellState FakeRiemann(const CellState& ls,
+                                 const CellState& rs,
+                                 const V3& normal,
+                                 const CellCloudView& cloud) {
 
-  const float rho_l = ref_dty + ls.density_offset;
-  const float rho_r = ref_dty + rs.density_offset;
+  const float rho_l = cloud.ref_dty + ls.density_offset;
+  const float rho_r = cloud.ref_dty + rs.density_offset;
+  const V3 u_l = ls.momentum / rho_l;
+  const V3 u_r = rs.momentum / rho_r;
 
-  const float rho = sqrt(rho_l * rho_r);
-  const V3 u = (rs.momentum + ls.momentum) / (rho_r + rho_l);
+  const float rho = 0.5f * (rho_l + rho_r);
+  const V3 u = 0.5f * (u_l + u_r);
   const float u_n = dot(u, normal);
 
   CellState F;
-  F.density_offset = rho * u_n - 0.01f * sos * (rs.density_offset - ls.density_offset);
-  F.momentum = rho * u_n * u + normal * prs(rho - ref_dty, sos);
+  F.density_offset = rho * u_n;
+  F.momentum = rho * u_n * u + normal * prs(rho - cloud.ref_dty, cloud.sos);
+
+  F.momentum += (cloud.kin_visc * cloud.ref_dty / cloud.h) * (u_l - u_r);
   return F;
 }
 
@@ -95,7 +101,7 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
   for (uint32_t z = blockIdx.z * blockDim.z + threadIdx.z; z < cloud.size_z; z += blockDim.z * gridDim.z) {
     for (uint32_t y = blockIdx.y * blockDim.y + threadIdx.y; y < cloud.size_y; y += blockDim.y * gridDim.y) {
       for (uint32_t x = blockIdx.x * blockDim.x + threadIdx.x; x < cloud.size_x; x += blockDim.x * gridDim.x) {
-        const uint32_t c = index_3d(x, y, z, cloud.size_x, cloud.size_y);
+        const uint32_t c = index_3d(x, y, z, cloud.size_y, cloud.size_z);
         const CellState cs = cloud.cell_state[c];
         const float rho_c = cloud.ref_dty + cs.density_offset;
         const V3 vel_c = cs.momentum / rho_c;
@@ -107,15 +113,15 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
           const uint32_t ny = y + static_cast<uint32_t>(dir[1]);
           const uint32_t nz = z + static_cast<uint32_t>(dir[2]);
           if (nx < cloud.size_x && ny < cloud.size_y && nz < cloud.size_z) {
-            const uint32_t n = index_3d(nx, ny, nz, cloud.size_x, cloud.size_y);
+            const uint32_t n = index_3d(nx, ny, nz, cloud.size_y, cloud.size_z);
             ns = cloud.cell_state[n];
           } else {
             ns.density_offset = cs.density_offset;
             ns.momentum = -cs.momentum;
           }
-          const CellState flux = FakeRiemann(cs, ns, V3(dir), cloud.ref_dty, cloud.sos);
-          tmp.momentum +=
-              inv_h * cloud.kin_visc * cloud.ref_dty * (ns.momentum / (cloud.ref_dty + ns.density_offset) - vel_c);
+          const CellState flux = FakeRiemann(cs, ns, V3(dir), cloud);
+          // tmp.momentum +=
+          //     inv_h * cloud.kin_visc * cloud.ref_dty * (ns.momentum / (cloud.ref_dty + ns.density_offset) - vel_c);
           tmp.density_offset -= flux.density_offset;
           tmp.momentum -= flux.momentum;
         }
@@ -178,9 +184,9 @@ Simulation::Simulation(const io::RunConfig::SolverSettings& settings, const io::
 
     const dim3 block(8, 8, 4);
     const int target_blocks = std::max(32, device_properties.multiProcessorCount * 4);
-    const int grid_x = 4;
+    const int grid_z = 4;
     const int grid_y = 4;
-    const int grid_z = std::max(2, (target_blocks + grid_x * grid_y - 1) / (grid_x * grid_y));
+    const int grid_x = std::max(2, (target_blocks + grid_z * grid_y - 1) / (grid_z * grid_y));
     launch = {block, dim3(grid_x, grid_y, grid_z)};
   }
 }

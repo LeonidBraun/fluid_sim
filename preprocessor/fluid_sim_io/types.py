@@ -58,17 +58,14 @@ class Frame:
                 "density_offset and momentum fields must agree on (nx, ny, nz)."
             )
 
-        # Solver storage order is (nz, ny, nx[, 3]); Python-facing field order is (nx, ny, nz[, 3]).
-        density_solver = np.transpose(density, (2, 1, 0))
-        momentum_solver = np.transpose(momentum_field, (2, 1, 0, 3))
         return cls(
-            density_offset=density_solver.reshape(-1),
-            momentum=momentum_solver.reshape(-1),
+            density_offset=density.reshape(-1),
+            momentum=momentum_field.reshape(-1),
         )
 
     @classmethod
     def read_hdf5(cls, path: str | Path, nx: int, ny: int, nz: int = 1) -> "Frame":
-        density_offset, momentum = read_frame_payload(path)
+        density_offset, momentum = read_frame_payload(path, nx, ny, nz)
         frame = cls(density_offset=density_offset, momentum=momentum)
         frame.validate(nx, ny, nz)
         return frame
@@ -90,11 +87,11 @@ class Frame:
 
     def density_offset_grid(self, nx: int, ny: int, nz: int = 1) -> Any:
         self.validate(nx, ny, nz)
-        return self.density_offset.reshape(int(nz), int(ny), int(nx))
+        return self.density_offset.reshape(int(nx), int(ny), int(nz))
 
     def momentum_grid(self, nx: int, ny: int, nz: int = 1) -> Any:
         self.validate(nx, ny, nz)
-        return self.momentum.reshape(int(nz), int(ny), int(nx), 3)
+        return self.momentum.reshape(int(nx), int(ny), int(nz), 3)
 
 @dataclass(frozen=True)
 class StateGrid:

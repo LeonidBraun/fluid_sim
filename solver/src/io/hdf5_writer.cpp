@@ -52,12 +52,12 @@ void write_frame_hdf5(const std::filesystem::path& output_path, int nx, int ny, 
   write_float_dataset(
       file.get(),
       "density_offset",
-      {static_cast<hsize_t>(nz), static_cast<hsize_t>(ny), static_cast<hsize_t>(nx)},
+      {static_cast<hsize_t>(nx), static_cast<hsize_t>(ny), static_cast<hsize_t>(nz)},
       frame.density_offset.data());
   write_float_dataset(
       file.get(),
       "momentum",
-      {static_cast<hsize_t>(nz), static_cast<hsize_t>(ny), static_cast<hsize_t>(nx), 3},
+      {static_cast<hsize_t>(nx), static_cast<hsize_t>(ny), static_cast<hsize_t>(nz), 3},
       frame.momentum.data());
 }
 

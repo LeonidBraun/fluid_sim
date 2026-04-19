@@ -151,9 +151,9 @@ print(last_state.time)
 print(momentum.shape)
 ```
 
-The HDF5 payload stores:
+The frame HDF5 payload now stores:
 
-- `density_offset` with shape `(nz, ny, nx)`
-- `momentum` with shape `(nz, ny, nx, 3)`
+- `density_offset` with shape `(nx, ny, nz)`
+- `momentum` with shape `(nx, ny, nz, 3)`
 
 Reading HDF5 frames requires `numpy` and `h5py` in the Python environment you use for postprocessing.
