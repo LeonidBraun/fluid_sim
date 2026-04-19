@@ -216,19 +216,21 @@ IO::IO(const std::filesystem::path& config_path)
   std::filesystem::create_directories(data_dir_);
 
   run_config_.outputs.clear();
-  saved_frames_.clear();
+  saved_frame_count_ = 0;
 }
 
 double IO::last_saved_time() const {
-  if (saved_frames_.empty()) {
+  if (run_config_.outputs.empty()) {
     return -std::numeric_limits<double>::infinity();
   }
-  return saved_frames_.back().time;
+  const auto output_index = run_config_.outputs.size() - 1;
+  const auto state_path = root_path_ / run_config_.outputs[output_index];
+  return LoadStateFile(state_path).time;
 }
 
 void IO::save_output(const Simulation& simulation) {
   const io::Frame frame = simulation.download_frame();
-  const std::size_t frame_index = saved_frames_.size();
+  const std::size_t frame_index = saved_frame_count_;
 
   const std::string frame_name = "frame_" + std::to_string(frame_index) + ".h5";
   const std::string state_name = "state_" + std::to_string(frame_index) + ".json";
@@ -243,11 +245,10 @@ void IO::save_output(const Simulation& simulation) {
   state.grid.frame = io::Filed<io::Frame>{frame_name, frame};
   WriteStateFile(state_path, state);
 
-  saved_frames_.push_back({std::string("data/") + frame_name, simulation.time()});
+  ++saved_frame_count_;
   run_config_.outputs.push_back((std::filesystem::path("outputs") / "data" / state_name).generic_string());
 
   WriteRunConfig(config_path_, run_config_);
-  write_xdmf_series(output_root_ / "series.xdmf", init_state_, saved_frames_);
 }
 
 void IO::PrintUsage(std::ostream& stream) {

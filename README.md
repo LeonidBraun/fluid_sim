@@ -6,7 +6,7 @@
 ./solver/build/fluid_sim ../work_dir/test_sim/test_sim.json
 ```
 
-The solver reads a run config JSON, an initial state JSON, and HDF5 frame data. It also writes `outputs/series.xdmf` for ParaView, but the simulation state is described by JSON files plus the referenced HDF5 frames.
+The solver reads a run config JSON, an initial state JSON, and HDF5 frame data. The simulation state is described by JSON files plus the referenced HDF5 frames.
 
 ## Data Model
 

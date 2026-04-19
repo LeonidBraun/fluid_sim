@@ -43,24 +43,35 @@ template __device__ uint32_t index_3d<uint32_t>(uint32_t x, uint32_t y, uint32_t
 __device__ float prs(const float dty_offset, const float sos) {
   return sos * sos * dty_offset;
 }
+__device__ float dq(const float rel_dty_offset, const float sos) {
+  return sos * sos * log1p(rel_dty_offset);
+}
 
 __device__ CellState FakeRiemann(const CellState& ls,
                                  const CellState& rs,
                                  const V3& normal,
                                  const CellCloudView& cloud) {
 
-  const float rho_l = cloud.ref_dty + ls.density_offset;
-  const float rho_r = cloud.ref_dty + rs.density_offset;
-  const V3 u_l = ls.momentum / rho_l;
-  const V3 u_r = rs.momentum / rho_r;
+  const float rho_l = ls.density_offset;
+  const float rho_r = rs.density_offset;
+  const V3 u_l = ls.momentum / (rho_l + cloud.ref_dty);
+  const V3 u_r = rs.momentum / (rho_r + cloud.ref_dty);
 
   const float rho = 0.5f * (rho_l + rho_r);
   const V3 u = 0.5f * (u_l + u_r);
   const float u_n = dot(u, normal);
 
   CellState F;
-  F.density_offset = rho * u_n;
-  F.momentum = rho * u_n * u + normal * prs(rho - cloud.ref_dty, cloud.sos);
+  F.density_offset = (rho + cloud.ref_dty) * u_n;
+  F.momentum = (rho + cloud.ref_dty) * u_n * u + normal * prs(rho, cloud.sos);
+  const float deta_1 = dq(rho_l / cloud.ref_dty, cloud.sos) - dq(rho_r / cloud.ref_dty, cloud.sos) -
+                       0.5f * (dot(u_l, u_l) - dot(u_r, u_r));
+  const V3 deta_2 = u_l - u_r;
+  const float deta_F = prs(rho_l, cloud.sos) * dot(u_l, normal) - prs(rho_r, cloud.sos) * dot(u_r, normal);
+
+  const float phi = F.density_offset * deta_1 + dot(F.momentum, deta_2) - deta_F;
+  const float deta_sq = deta_1 * deta_1 + dot(deta_2, deta_2);
+  V4; //TODO projection vector
 
   F.momentum += (cloud.kin_visc * cloud.ref_dty / cloud.h) * (u_l - u_r);
   return F;

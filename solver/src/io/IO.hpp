@@ -1,7 +1,6 @@
 #pragma once
 
 #include "io/simulation_types.hpp"
-#include "io/xdmf_writer.hpp"
 
 #include <filesystem>
 #include <iosfwd>
@@ -34,7 +33,7 @@ public:
   [[nodiscard]] double last_saved_time() const;
 
   [[nodiscard]] std::size_t last_output() const {
-    return saved_frames_.empty() ? 0U : saved_frames_.size() - 1U;
+    return saved_frame_count_ == 0 ? 0U : saved_frame_count_ - 1U;
   }
 
   void save_output(const Simulation& simulation);
@@ -55,7 +54,7 @@ private:
   std::filesystem::path data_dir_;
   io::RunConfig run_config_{};
   io::State init_state_{};
-  std::vector<SavedFrame> saved_frames_{};
+  std::size_t saved_frame_count_ = 0;
 };
 
 } // namespace fluid_sim

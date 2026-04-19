@@ -56,8 +56,6 @@ class VortexRing:
         )
 
         grid.write_hdf5(folder / "grid.h5")
-        fs.Grid.write_xdmf(folder / "grid.h5")
-        # grid.write_xdmf(folder / "grid.h5")
 
         grid = fs.Grid.read_hdf5(folder / "grid.h5")
 

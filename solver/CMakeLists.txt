@@ -22,7 +22,6 @@ if(CMAKE_CUDA_COMPILER)
     src/io/grid.cpp
     src/io/hdf5_common.cpp
     src/io/hdf5_writer.cpp
-    src/io/xdmf_writer.cpp
     src/simulation/simulation.cu
   )
 
