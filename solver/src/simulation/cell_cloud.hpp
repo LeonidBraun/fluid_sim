@@ -26,6 +26,7 @@ struct CellCloudView {
   float dty_visc = 0.0;
   float ref_dty = 0.0;
   float sos = 0.0;
+  V3 gravity = V3{0.f, -1.f, 0.f};
 };
 
 struct CellCloud {

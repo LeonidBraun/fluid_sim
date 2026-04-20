@@ -75,7 +75,7 @@ class VortexTest:
                 nx=nx, ny=ny, nz=nz, h=h, frame=fs.Filed(data=initial_frame)
             ),
             material=fs.StateMaterialProperties(
-                speed_of_sound=4.0,
+                speed_of_sound=4,
                 reference_density=1.225,
                 # kinematic_viscosity=5e-5,
                 kinematic_viscosity=5e-5,
@@ -93,6 +93,7 @@ class VortexTest:
         run_config.write_case(case_dir / "run_config.json")
 
     def run(self):
+        print(str(SOLVER) + " " + str(WORKDIR / "VortexTest" / "run_config.json"))
         subprocess.run(
             [str(SOLVER), str(WORKDIR / "VortexTest" / "run_config.json")], check=True
         )
