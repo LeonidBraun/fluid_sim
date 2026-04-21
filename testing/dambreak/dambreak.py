@@ -29,7 +29,7 @@ def total_kinetic_energy(state: fs.State) -> float:
     return float(0.5 * ((momentum_squared / rho).sum()) * h * h * h)
 
 
-class VortexTest:
+class Dambreak:
     def create(self):
         case_dir = WORKDIR / "VortexTest"
 
@@ -49,24 +49,19 @@ class VortexTest:
         x, y, z = np.meshgrid(x, y, z, indexing="ij")
 
         # Work in Python-facing field layout: (nx, ny, nz, 3), then let Frame flatten for solver IO.
-        density_offset = np.zeros((nx, ny, nz), dtype=np.float32)
+        density_offset = np.zeros((nx, ny, nz), dtype=np.float32) - 0.99
         momentum = np.empty((nx, ny, nz, 3), dtype=np.float32)
 
         cx = 0.5 * nx * h
         cy = 0.5 * ny * h
         cz = 0.5 * nz * h
-        omega = 1.0
-        gaussian = np.exp(-(((x - cx) ** 2) + ((y - cy) ** 2)) / (0.5**2)).astype(
-            np.float32
-        )
 
-        momentum[..., 0] = -5 * (y - cy) * gaussian * omega
-        # momentum[..., 0] = -np.sign(y - cy) * gaussian * omega
-        # momentum[..., 0] = -np.sign(x - cx) * gaussian * omega
-        momentum[..., 1] = 5 * (x - cx) * gaussian * omega
-        # momentum[..., 1] =  np.sign(x - cx) * gaussian * omega
-        # momentum[..., 2] = 0.15 * (z - cz) * gaussian * omega
-        momentum += 0.01 * (np.random.rand(*momentum.shape) - 0.5)
+        mask = (x < 1) & (y < 1.5)
+        # print(mask)
+        density_offset[mask] = 0
+        # print(density_offset)
+
+        # momentum += 0.01 * (np.random.rand(*momentum.shape) - 0.5)
         initial_frame = fs.Frame.from_fields(
             density_offset=density_offset, momentum=momentum
         )
@@ -81,15 +76,15 @@ class VortexTest:
                 speed_of_sound=4.0,
                 reference_density=1,
                 # kinematic_viscosity=5e-5,
-                kinematic_viscosity=2e-4,
+                kinematic_viscosity=1e-4,
                 # kinematic_viscosity=0e-5,
-                density_diffusivity=0.2,
+                density_diffusivity=0.0,
             ),
         )
 
         # Same for the init state file reference on the run config.
         run_config = fs.RunConfig(
-            solver_settings=fs.SolverSettings(cfl=0.5),
+            solver_settings=fs.SolverSettings(cfl=1.0),
             output_settings=fs.OutputSettings(end_time=20, output_interval=20 / 300),
             init_state=fs.Filed(data=initial_state),
         )
@@ -120,7 +115,7 @@ class VortexTest:
 
 
 if __name__ == "__main__":
-    case = VortexTest()
+    case = Dambreak()
     case.create()
     case.run()
     case.evaluate()

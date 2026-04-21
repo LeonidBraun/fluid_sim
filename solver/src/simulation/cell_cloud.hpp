@@ -26,7 +26,7 @@ struct CellCloudView {
   float dty_visc = 0.0;
   float ref_dty = 0.0;
   float sos = 0.0;
-  V3 gravity = V3{0.f, -1.f, 0.f};
+  V3 gravity = V3{0.f, 0.f, 0.f};
 };
 
 struct CellCloud {
@@ -42,6 +42,7 @@ struct CellCloud {
   float dty_visc;
   float ref_dty;
   float sos;
+  V3 gravity = V3{0.f, -1.f, 0.f};
 
   void resize(const uint32_t new_size_x, const uint32_t new_size_y, const uint32_t new_size_z) {
     size_x = new_size_x;
@@ -58,7 +59,7 @@ struct CellCloud {
 
   [[nodiscard]] CellCloudView view() {
     return CellCloudView{
-        size_x, size_y, size_z, cell_state.data(), cell_state_tmp.data(), h, kin_visc, dty_visc, ref_dty, sos};
+        size_x, size_y, size_z, cell_state.data(), cell_state_tmp.data(), h, kin_visc, dty_visc, ref_dty, sos, gravity};
   }
 };
 

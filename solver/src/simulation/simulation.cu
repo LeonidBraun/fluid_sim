@@ -27,8 +27,10 @@ namespace {
 
 struct MaxAbsVelocity {
   __host__ __device__ float operator()(const CellState& cell) const {
-    const float max = fmaxf(fmaxf(fabsf(cell.momentum[0]), fabsf(cell.momentum[1])), fabsf(cell.momentum[2]));
-    return max / (ref_dty + cell.density_offset);
+    const float rho_floor = 1.0e-4f * ref_dty;
+    const float rho_total = max(rho_floor, ref_dty + cell.density_offset);
+    const float momentum_l1 = fabsf(cell.momentum[0]) + fabsf(cell.momentum[1]) + fabsf(cell.momentum[2]);
+    return momentum_l1 / rho_total;
   }
   const float ref_dty;
 };
@@ -40,17 +42,18 @@ __device__ T index_3d(T x, T y, T z, T ny, T nz) {
 template __device__ int index_3d<int>(int x, int y, int z, int ny, int nz);
 template __device__ uint32_t index_3d<uint32_t>(uint32_t x, uint32_t y, uint32_t z, uint32_t ny, uint32_t nz);
 
+__device__ float scale(const float dty_offset) {
+  const float scale = dty_offset < 0 ? 0.0f : 1.0f;
+  return scale;
+}
 __device__ float prs(const float dty_offset, const float sos) {
   // return sos * sos * dty_offset;
   // return sos * sos * max(0.f, dty_offset);
-  // const float scale = dty_offset < 0 ? 0.01f : 1.0f;
-  const float scale = 1.0f;
-  return sos * sos * scale * dty_offset;
+  return sos * sos * scale(dty_offset) * dty_offset;
 }
 __device__ float comp_energy(const float dty_offset, const float sos, const float ref_dty) {
-  // const float scale = dty_offset < 0 ? 0.01f : 1.0f;
-  const float scale = 1.0f;
-  return sos * sos * scale * (log1p(dty_offset / ref_dty) - dty_offset / max(1e-5f * ref_dty, dty_offset + ref_dty));
+  return sos * sos * scale(dty_offset) *
+         (log1p(dty_offset / ref_dty) - dty_offset / max(1e-5f * ref_dty, dty_offset + ref_dty));
 }
 __device__ float dq(const float dty_offset, const float sos, const float ref_dty) {
   // return sos * sos * log1p(rel_dty_offset);
@@ -58,51 +61,317 @@ __device__ float dq(const float dty_offset, const float sos, const float ref_dty
   return comp_energy(dty_offset, sos, ref_dty) + prs(dty_offset, sos) / max(1e-5f * ref_dty, dty_offset + ref_dty);
 }
 
-__device__ CellState FakeRiemann(const CellState& ls,
-                                 const CellState& rs,
-                                 const V3& normal,
-                                 const CellCloudView& cloud) {
+__device__ float clamp01(const float value) {
+  return fminf(1.0f, fmaxf(0.0f, value));
+}
+
+__device__ float safe_density_total(const float density_offset, const float ref_dty, const float rho_floor) {
+  return max(rho_floor, ref_dty + density_offset);
+}
+
+__device__ float stage_dt_floor(const CellCloudView& cloud, const float dt) {
+  return max(dt, 1.0e-6f * cloud.h / max(cloud.sos, 1.0e-6f));
+}
+
+struct FluxBudget {
+  float min_mass_flux;
+  float max_mass_flux;
+  float target_mass_flux;
+};
+
+__device__ FluxBudget mass_flux_budget(const float centered_mass_flux,
+                                       const float rho_tot_l,
+                                       const float rho_tot_r,
+                                       const float rho_floor,
+                                       const CellCloudView& cloud,
+                                       const float dt) {
+  constexpr float positivity_safety = 0.9f;
+  constexpr float faces_per_cell = 6.0f;
+  const float stage_dt = stage_dt_floor(cloud, dt);
+  const float left_budget =
+      positivity_safety * max(0.0f, rho_tot_l - rho_floor) * cloud.h / (faces_per_cell * stage_dt);
+  const float right_budget =
+      positivity_safety * max(0.0f, rho_tot_r - rho_floor) * cloud.h / (faces_per_cell * stage_dt);
+  const float min_mass_flux = -right_budget;
+  const float max_mass_flux = left_budget;
+  const float target_mass_flux =
+      min_mass_flux <= max_mass_flux ? fminf(max_mass_flux, fmaxf(min_mass_flux, centered_mass_flux)) : 0.0f;
+  return FluxBudget{min_mass_flux, max_mass_flux, target_mass_flux};
+}
+
+struct EntropyData {
+  float residual;
+  float momentum_damping;
+};
+
+__device__ EntropyData entropy_data(const CellState& flux,
+                                    const float rho_l,
+                                    const float rho_r,
+                                    const V3& u_l,
+                                    const V3& u_r,
+                                    const float u_n_l,
+                                    const float u_n_r,
+                                    const V3& d_m_mom,
+                                    const CellCloudView& cloud) {
+  const float deta_1 = dq(rho_r, cloud.sos, cloud.ref_dty) - dq(rho_l, cloud.sos, cloud.ref_dty) -
+                       0.5f * (dot(u_r, u_r) - dot(u_l, u_l));
+  const V3 deta_2 = u_r - u_l;
+  const float deta_F = prs(rho_r, cloud.sos) * u_n_r - prs(rho_l, cloud.sos) * u_n_l;
+  return EntropyData{
+      flux.density_offset * deta_1 + dot(flux.momentum, deta_2) - deta_F,
+      dot(d_m_mom, deta_2),
+  };
+}
+
+__device__ float
+near_vacuum_blend(const float rho_tot_l, const float rho_tot_r, const float rho_floor, const float ref_dty) {
+  const float rho_min = min(rho_tot_l, rho_tot_r);
+  return clamp01((5.0e-2f * ref_dty - rho_min) / (5.0e-2f * ref_dty - rho_floor));
+}
+
+__device__ void sanitize_budgeted_flux(CellState& flux,
+                                       const float min_mass_flux,
+                                       const float max_mass_flux,
+                                       const float near_vacuum,
+                                       const float wave_speed,
+                                       const float rho_tot_l,
+                                       const float rho_tot_r) {
+  flux.density_offset = fminf(max_mass_flux, fmaxf(min_mass_flux, flux.density_offset));
+
+  const float momentum_cap = 2.0f * wave_speed * max(rho_tot_l, rho_tot_r);
+  for (int k = 0; k < 3; ++k) {
+    if (!isfinite(flux.momentum[k])) {
+      flux.momentum[k] = 0.0f;
+    } else {
+      flux.momentum[k] = fminf(momentum_cap, fmaxf(-momentum_cap, flux.momentum[k]));
+    }
+  }
+  if (!isfinite(flux.density_offset)) {
+    flux.density_offset = 0.0f;
+  }
+
+  if (near_vacuum > 0.0f) {
+    const float vacuum_keep = 1.0f - near_vacuum;
+    flux.density_offset *= vacuum_keep;
+    flux.momentum *= vacuum_keep;
+  }
+}
+
+__device__ CellState FakeRiemann(const CellState& ls,        //
+                                 const CellState& rs,        //
+                                 const V3& normal,           //
+                                 const CellCloudView& cloud, //
+                                 const float dt) {
 
   const float rho_l = ls.density_offset;
   const float rho_r = rs.density_offset;
-  const V3 u_l = ls.momentum / max(1e-5f * cloud.ref_dty, rho_l + cloud.ref_dty);
-  const V3 u_r = rs.momentum / max(1e-5f * cloud.ref_dty, rho_r + cloud.ref_dty);
+  const float dty_l = max(1e-5f * cloud.ref_dty, rho_l + cloud.ref_dty);
+  const float dty_r = max(1e-5f * cloud.ref_dty, rho_r + cloud.ref_dty);
+  const V3 u_l = ls.momentum / dty_l;
+  const V3 u_r = rs.momentum / dty_r;
 
-  const float rho = 0.5f * (rho_l + rho_r);
-  const float dty = rho + cloud.ref_dty;
+  // const float rho = 0.5f * (rho_l + rho_r);
+  // const float rho = 0.5f * (rho_l + rho_r);
+  // const float dty = rho + cloud.ref_dty;
+  const float dty = sqrt(dty_l * dty_r);
   const V3 u = 0.5f * (u_l + u_r);
   const float u_n = dot(u, normal);
 
   CellState F;
-  F.density_offset = dty * u_n;
-  F.momentum = dty * u_n * u + normal * prs(rho, cloud.sos);
+  // F.density_offset = dty * u_n;
+  // F.momentum = dty * u_n * u + normal * prs(dty - cloud.ref_dty, cloud.sos);
+  // F.density_offset = max(0.0f, dot(ls.momentum, normal));
+  // F.density_offset += min(0.0f, dot(rs.momentum, normal));
+  // F.density_offset += p;
+  // {
+  //   const float rho_up = F.density_offset < 0.0f ? rho_l : rho_r;
+  //   const float max_rho_flux = min(fabsf(F.density_offset), 0.3f * (rho_up + cloud.ref_dty) * cloud.h / dt);
+  //   F.density_offset = F.density_offset > 0.0f ? max_rho_flux : -max_rho_flux;
+  // }
+  // F.momentum = ls.momentum * max(0.0f, dot(ls.momentum, normal)) / dty_l;
+  // F.momentum += rs.momentum * min(0.0f, dot(rs.momentum, normal)) / dty_r;
+  // const float p = prs(sqrt(dty_l * dty_r) - ls.density_offset, cloud.sos);
+  // F.momentum += normal * p;
 
-  const float deta_1 = dq(rho_l, cloud.sos, cloud.ref_dty) - dq(rho_r, cloud.sos, cloud.ref_dty) -
-                       0.5f * (dot(u_l, u_l) - dot(u_r, u_r));
-  const V3 deta_2 = u_l - u_r;
-  const float deta_F = prs(rho_l, cloud.sos) * dot(u_l, normal) - prs(rho_r, cloud.sos) * dot(u_r, normal);
+  {
+    const float deta_1 = dq(rho_r, cloud.sos, cloud.ref_dty) - dq(rho_l, cloud.sos, cloud.ref_dty) -
+                         0.5f * (dot(u_r, u_r) - dot(u_l, u_l)); // - cloud.h * dot(cloud.gravity, normal);
+    const V3 deta_2 = u_r - u_l;
+    const float deta_F = prs(rho_r, cloud.sos) * dot(u_r, normal) - prs(rho_l, cloud.sos) * dot(u_l, normal);
 
-  const float phi = min(.0f, F.density_offset * deta_1 + dot(F.momentum, deta_2) - deta_F);
-  if (phi != 0.f) {
-    // const float deta_sq = deta_1 + dot(deta_2, u);
+    const float phi = max(.0f, F.density_offset * deta_1 + dot(F.momentum, deta_2) - deta_F);
+    // const float phi = (F.density_offset * deta_1 + dot(F.momentum, deta_2) - deta_F);
+    if (phi != 0.f) {
+      // const float deta_sq = deta_1 + dot(deta_2, u);
+      const float deta_sq = deta_1 * deta_1 + dot(deta_2, deta_2);
+      if (deta_sq != 0.f) {
+        constexpr float overdamp = 2.f;
+        // F.density_offset -= overdamp * phi / deta_sq;
+        // F.momentum -= u * (overdamp * dty * phi / deta_sq);
+        F.density_offset -= overdamp * deta_1 * phi / deta_sq;
+        F.momentum -= deta_2 * (overdamp * phi / deta_sq);
+      }
+    }
+  }
+  // const float rho_min = min(rho_l, rho_r);
+  // if (rho_min) {
+  // const float a = max(fabsf(dot(u_l, normal)) + cloud.sos, fabsf(dot(u_r, normal)) + cloud.sos);
+  // F.density_offset += 0.25f * a * (rho_l - rho_r);
+  // F.momentum += 0.25f * a * (ls.momentum - rs.momentum);
+  // }
+  // F.momentum += normal * (0.5f * cloud.dty_visc * cloud.sos * dot(normal, (ls.momentum - rs.momentum)));
+  // F.momentum += normal * (0.5f * 0.1f * cloud.sos * dot(normal, (ls.momentum - rs.momentum)));
+  // F.density_offset += cloud.dty_visc / cloud.sos * (prs(rho_l, cloud.sos) - prs(rho_r, cloud.sos));
+  F.density_offset += cloud.dty_visc * cloud.sos * (rho_l - rho_r);
+
+  F.momentum += (cloud.kin_visc * min(dty_l, dty_r) / cloud.h) * (u_l - u_r);
+  return F;
+}
+
+__device__ CellState ComputeFlux(const CellState& ls,        //
+                                 const CellState& rs,        //
+                                 const V3& normal,           //
+                                 const CellCloudView& cloud, //
+                                 const float dt) {
+  const float rho_l = ls.density_offset;
+  const float rho_r = rs.density_offset;
+  const float rho_tot_l = max(1e-5f * cloud.ref_dty, cloud.ref_dty + rho_l);
+  const float rho_tot_r = max(1e-5f * cloud.ref_dty, cloud.ref_dty + rho_r);
+  const V3 u_l = ls.momentum / rho_tot_l;
+  const V3 u_r = rs.momentum / rho_tot_r;
+  const float u_n_l = dot(u_l, normal);
+  const float u_n_r = dot(u_r, normal);
+  const float wave_speed = max(fabsf(u_n_l) + cloud.sos, fabsf(u_n_r) + cloud.sos);
+
+  CellState low;
+  low.density_offset = 0.5f * dot(ls.momentum + rs.momentum, normal) - 0.5f * wave_speed * (rho_r - rho_l);
+  low.momentum = 0.5f * ls.momentum * u_n_l + 0.5f * rs.momentum * u_n_r;
+  low.momentum += 0.5f * normal * (prs(rho_l, cloud.sos) + prs(rho_r, cloud.sos));
+  low.momentum -= 0.5f * wave_speed * (rs.momentum - ls.momentum);
+
+  CellState high = FakeRiemann(ls, rs, normal, cloud, dt);
+
+  const float rho_floor = 1.0e-4f * cloud.ref_dty;
+  const float rho_blend = 5.0e-2f * cloud.ref_dty;
+  const float rho_min = min(rho_tot_l, rho_tot_r);
+  const float high_weight = clamp01((rho_min - rho_floor) / max(rho_blend - rho_floor, 1.0e-6f * cloud.ref_dty));
+
+  CellState F;
+  F.density_offset = low.density_offset + high_weight * (high.density_offset - low.density_offset);
+  F.momentum = low.momentum + high_weight * (high.momentum - low.momentum);
+
+  const float deta_1 = dq(rho_r, cloud.sos, cloud.ref_dty) - dq(rho_l, cloud.sos, cloud.ref_dty) -
+                       0.5f * (dot(u_r, u_r) - dot(u_l, u_l));
+  const V3 deta_2 = u_r - u_l;
+  const float deta_F = prs(rho_r, cloud.sos) * u_n_r - prs(rho_l, cloud.sos) * u_n_l;
+  const float phi = max(0.0f, F.density_offset * deta_1 + dot(F.momentum, deta_2) - deta_F);
+  if (phi > 0.0f) {
     const float deta_sq = deta_1 * deta_1 + dot(deta_2, deta_2);
-    if (deta_sq != 0.f) {
-      constexpr float overdamp = 2.f;
-      // F.density_offset -= overdamp * phi / deta_sq;
-      // F.momentum -= u * (overdamp * dty * phi / deta_sq);
+    if (deta_sq > 0.0f) {
+      constexpr float overdamp = 1.0f;
       F.density_offset -= overdamp * deta_1 * phi / deta_sq;
       F.momentum -= deta_2 * (overdamp * phi / deta_sq);
     }
   }
-  const float rho_min = min(rho_l, rho_r);
-  if (rho_min) {
-    const float a =
-        -rho_min / cloud.ref_dty * max(fabsf(dot(u_l, normal)) + cloud.sos, fabsf(dot(u_r, normal)) + cloud.sos);
-    F.density_offset += 0.1f * a * (rho_l - rho_r);
-    F.momentum += 0.1f * a * (ls.momentum - rs.momentum);
+
+  const float stage_dt = max(dt, 1.0e-6f * cloud.h / max(cloud.sos, 1.0e-6f));
+  constexpr float faces_per_cell = 6.0f;
+  constexpr float outgoing_safety = 0.9f;
+  const float left_budget = outgoing_safety * rho_tot_l * cloud.h / (faces_per_cell * stage_dt);
+  const float right_budget = outgoing_safety * rho_tot_r * cloud.h / (faces_per_cell * stage_dt);
+  const float unclamped_mass_flux = F.density_offset;
+  if (unclamped_mass_flux > 0.0f) {
+    F.density_offset = fminf(unclamped_mass_flux, left_budget);
+  } else {
+    F.density_offset = fmaxf(unclamped_mass_flux, -right_budget);
   }
 
-  F.momentum += (cloud.kin_visc * cloud.ref_dty / cloud.h) * (u_l - u_r);
+  if (fabsf(unclamped_mass_flux) > 0.0f) {
+    const float flux_scale = fabsf(F.density_offset) / fabsf(unclamped_mass_flux);
+    F.momentum = low.momentum + flux_scale * (F.momentum - low.momentum);
+  }
+
+  return F;
+}
+
+__device__ CellState BudgetedRoeFlux(const CellState& ls,        //
+                                     const CellState& rs,        //
+                                     const V3& normal,           //
+                                     const CellCloudView& cloud, //
+                                     const float dt) {
+  const float rho_floor = 1.0e-4f * cloud.ref_dty;
+  const float rho_total_l = safe_density_total(ls.density_offset, cloud.ref_dty, rho_floor);
+  const float rho_total_r = safe_density_total(rs.density_offset, cloud.ref_dty, rho_floor);
+  const float rho_offset_l = rho_total_l - cloud.ref_dty;
+  const float rho_offset_r = rho_total_r - cloud.ref_dty;
+  const V3 vel_l = ls.momentum / rho_total_l;
+  const V3 vel_r = rs.momentum / rho_total_r;
+  const float vel_n_l = dot(vel_l, normal);
+  const float vel_n_r = dot(vel_r, normal);
+
+  const float sqrt_rho_l = sqrtf(rho_total_l);
+  const float sqrt_rho_r = sqrtf(rho_total_r);
+  const float inv_sqrt_sum = 1.0f / (sqrt_rho_l + sqrt_rho_r);
+  const V3 vel_roe = (sqrt_rho_l * vel_l + sqrt_rho_r * vel_r) * inv_sqrt_sum;
+  const float vel_n_roe = dot(vel_roe, normal);
+  const float wave_speed = max(fabsf(vel_n_l), fabsf(vel_n_r)) + cloud.sos;
+
+  const V3 momentum_advective = 0.5f * ls.momentum * vel_n_l + 0.5f * rs.momentum * vel_n_r;
+  const V3 momentum_pressure = 0.5f * normal * (prs(rho_offset_l, cloud.sos) + prs(rho_offset_r, cloud.sos));
+
+  CellState F;
+  F.density_offset = 0.5f * dot(ls.momentum + rs.momentum, normal);
+  F.momentum = momentum_advective + momentum_pressure;
+
+  const float drho = rho_offset_r - rho_offset_l;
+  const V3 dm = rs.momentum - ls.momentum;
+  const float d_rho_mass = 0.5f * wave_speed * drho;
+  const V3 d_rho_mom = V3(0.0f);
+  const float d_m_mass = 0.0f;
+  const V3 d_m_mom = 0.5f * wave_speed * dm;
+
+  const float centered_mass_flux = F.density_offset;
+  const FluxBudget budget = mass_flux_budget(centered_mass_flux, rho_total_l, rho_total_r, rho_floor, cloud, dt);
+
+  float theta_rho = 0.0f;
+  if (fabsf(d_rho_mass) > 1.0e-12f) {
+    theta_rho = clamp01((centered_mass_flux - budget.target_mass_flux) / d_rho_mass);
+  }
+
+  const float mass_flux_scale =
+      fabsf(centered_mass_flux) > 1.0e-12f ? fabsf(budget.target_mass_flux) / fabsf(centered_mass_flux) : 0.0f;
+  F.density_offset -= theta_rho * d_rho_mass;
+  F.momentum -= theta_rho * d_rho_mom;
+  F.density_offset = budget.target_mass_flux;
+  F.momentum = clamp01(mass_flux_scale) * momentum_advective + momentum_pressure;
+
+  const EntropyData entropy =
+      entropy_data(F, rho_offset_l, rho_offset_r, vel_l, vel_r, vel_n_l, vel_n_r, d_m_mom, cloud);
+
+  float theta_m = 0.0f;
+  if (entropy.residual > 0.0f && entropy.momentum_damping > 0.0f) {
+    theta_m = clamp01(entropy.residual / entropy.momentum_damping);
+  }
+
+  F.density_offset -= theta_m * d_m_mass;
+  F.momentum -= theta_m * d_m_mom;
+
+  if (entropy.residual > 0.0f && entropy.momentum_damping <= 0.0f) {
+    F.density_offset -= 0.5f * wave_speed * drho;
+    F.momentum -= 0.5f * wave_speed * dm;
+  }
+
+  const float near_vacuum = near_vacuum_blend(rho_total_l, rho_total_r, rho_floor, cloud.ref_dty);
+  const float mass_flux_ratio =
+      fabsf(centered_mass_flux) > 1.0e-12f ? fabsf(F.density_offset) / fabsf(centered_mass_flux) : 0.0f;
+  const float momentum_keep = fmaxf(mass_flux_ratio, 1.0f - near_vacuum);
+  F.momentum *= clamp01(momentum_keep);
+
+  const float roe_visc = 0.25f * wave_speed * fabsf(vel_n_roe - 0.5f * (vel_n_l + vel_n_r));
+  F.momentum -= roe_visc * dm;
+  F.momentum += (cloud.kin_visc * cloud.ref_dty / cloud.h) * (vel_l - vel_r);
+  sanitize_budgeted_flux(
+      F, budget.min_mass_flux, budget.max_mass_flux, near_vacuum, wave_speed, rho_total_l, rho_total_r);
   return F;
 }
 
@@ -129,10 +398,12 @@ __global__ void FinishRK4(const CellState* base,
             6.0f;
     out[i].momentum = base[i].momentum +
                       dt * (k1[i].momentum + 2.0f * k2[i].momentum + 2.0f * k3[i].momentum + k4[i].momentum) / 6.0f;
+    // if (out[i].density_offset < 1e-5f - 1.0f)
+    //   out[i].momentum *= 0.0f;
   }
 }
 
-__global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
+__global__ void RHS(CellCloudView cloud, [[maybe_unused]] const float t, const float dt) {
   const float inv_h = 1.0f / cloud.h;
 
   using V3i = Vector<int, 3>;
@@ -159,7 +430,8 @@ __global__ void RHS(CellCloudView cloud, [[maybe_unused]] float t) {
             ns.density_offset = cs.density_offset;
             ns.momentum = -cs.momentum;
           }
-          const CellState flux = FakeRiemann(cs, ns, V3(dir), cloud);
+
+          const CellState flux = ComputeFlux(cs, ns, V3(dir), cloud, dt);
           // tmp.momentum +=
           //     inv_h * cloud.kin_visc * cloud.ref_dty * (ns.momentum / (cloud.ref_dty + ns.density_offset) - vel_c);
           tmp.density_offset -= flux.density_offset;
@@ -267,28 +539,29 @@ void Simulation::step(double max_dt) {
                          cloud_.kin_visc,
                          cloud_.dty_visc,
                          cloud_.ref_dty,
-                         cloud_.sos};
+                         cloud_.sos,
+                         cloud_.gravity};
   };
 
   // std::cout << cloud_.kin_visc << "\n";
-  RHS<<<launch.grid, launch.block>>>(make_view(base_state.data(), k1.data()), current_time);
+  RHS<<<launch.grid, launch.block>>>(make_view(base_state.data(), k1.data()), current_time, dt);
   // CUDA_CHECK(cudaGetLastError());
 
   BuildStageState<<<linear_grid, linear_block>>>(
       base_state.data(), k1.data(), stage_state.data(), 0.5f * dt, cell_count);
   // CUDA_CHECK(cudaGetLastError());
-  RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k2.data()), current_time + 0.5f * dt);
+  RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k2.data()), current_time + 0.5f * dt, dt);
   // CUDA_CHECK(cudaGetLastError());
 
   BuildStageState<<<linear_grid, linear_block>>>(
       base_state.data(), k2.data(), stage_state.data(), 0.5f * dt, cell_count);
   // CUDA_CHECK(cudaGetLastError());
-  RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k3.data()), current_time + 0.5f * dt);
+  RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k3.data()), current_time + 0.5f * dt, dt);
   // CUDA_CHECK(cudaGetLastError());
 
   BuildStageState<<<linear_grid, linear_block>>>(base_state.data(), k3.data(), stage_state.data(), dt, cell_count);
   // CUDA_CHECK(cudaGetLastError());
-  RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k4.data()), current_time + dt);
+  RHS<<<launch.grid, launch.block>>>(make_view(stage_state.data(), k4.data()), current_time + dt, dt);
   // CUDA_CHECK(cudaGetLastError());
 
   FinishRK4<<<linear_grid, linear_block>>>(
